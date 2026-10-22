@@ -30,8 +30,8 @@ context yourself.
       B -->|venv| V["UvVenv<br/><i>(venv + its Python)</i>"]
     ```
 
-    - **`Uv`** holds no files: each operation reads only what it needs from the Dagger
-      workspace (`ws`). Ask it for a single workspace by path
+    - **`Uv`** holds the source tree it reads from the Dagger workspace (`ws`). Ask it
+      for a single workspace by path
       (`workspace`) or for the collection of every workspace it can find (`workspaces`).
     - **`UvWorkspaceSource`** is one `uv` workspace (the files rooted at a `uv.lock`). From it
       you can read the required `uv` version, `audit` it (a check), `build` a container step by step, or
@@ -57,16 +57,16 @@ context yourself.
 === "Python SDK"
 
     ```python
-    ctr = uv().workspace(".").install(ws)
+    ctr = uv(ws).workspace(".").install()
     ```
 
 Under the hood this is equivalent to:
 
 ```python
 ctr = (
-    uv()
+    uv(ws)
     .workspace(".")
-    .build(ws)
+    .build()
     .with_remote_dependencies()  # uv sync --no-install-local
     .with_workspace_files()  # scaffold local package stubs
     .with_local_dependencies()  # editable-install from stubs, then copy real source
@@ -176,7 +176,7 @@ installing anything and hands back a `UvWorkspaceBuild`; you then call the steps
 order:
 
 ```python
-b = uv().workspace(".").build(ws, package=["my-app"])
+b = uv(ws).workspace(".").build(package=["my-app"])
 b = b.with_remote_dependencies()  # uv sync --no-install-local
 # ... run your own step here, e.g. `pulumi install` ...
 b = b.with_workspace_files()  # scaffold local package stubs

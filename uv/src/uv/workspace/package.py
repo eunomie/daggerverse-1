@@ -1,10 +1,9 @@
 import asyncio
-import posixpath
 from typing import Annotated
 
 from dagger import Doc, field, function, object_type
 from dagger.telemetry import get_tracer
-from dagger_clients.core import Workspace
+from dagger_clients.core import Directory
 
 from uv.utils import parse_indices
 from uv.workspace.index import UvIndex, dicts_to_indices, merge_indices, read_workspace_indices
@@ -14,13 +13,19 @@ from uv.workspace.index import UvIndex, dicts_to_indices, merge_indices, read_wo
 class UvPackageSource:
     """A single member package within a uv workspace.
 
-    Carries the uv workspace root path and the member's own path so it can
-    read both workspace-level and package-level index configuration.
+    Carries the workspace source tree, the workspace root path, and the
+    member's own path so it can read both workspace-level and package-level
+    index configuration.
     """
+
+    source: Annotated[
+        Directory,
+        Doc("Source tree containing the workspace."),
+    ] = field()
 
     workspace_path: Annotated[
         str,
-        Doc("uv workspace root path, relative to the workspace root (`.` for the root)."),
+        Doc("Workspace root path within source (`.` for a root workspace)."),
     ] = field()
 
     package_path: Annotated[
@@ -28,10 +33,16 @@ class UvPackageSource:
         Doc("Package path relative to the workspace root."),
     ] = field()
 
+    def _ws_dir(self) -> Directory:
+        return self.source if self.workspace_path == "." else self.source.directory(self.workspace_path)
+
+    def _pkg_dir(self) -> Directory:
+        ws = self._ws_dir()
+        return ws if self.package_path == "." else ws.directory(self.package_path)
+
     @function
     async def indices(
         self,
-        ws: Workspace,
         include_from_workspace: Annotated[
             bool,
             Doc(
@@ -52,8 +63,7 @@ class UvPackageSource:
         async def _read_pkg() -> list[dict]:
             with tracer.start_as_current_span("read package indices") as span:
                 span.set_attribute("package.path", self.package_path)
-                pyproject = posixpath.join(self.workspace_path, self.package_path, "pyproject.toml")
-                raw = parse_indices(await ws.file("/" + posixpath.normpath(pyproject)).contents())
+                raw = parse_indices(await self._pkg_dir().file("pyproject.toml").contents())
                 span.set_attribute("indices.count", len(raw))
                 span.set_attribute("indices.names", [e["name"] for e in raw])
                 return raw
@@ -64,10 +74,7 @@ class UvPackageSource:
         async def _read_ws() -> list[dict]:
             with tracer.start_as_current_span("read workspace indices") as span:
                 span.set_attribute("workspace.path", self.workspace_path)
-                ws_dir = ws.directory(
-                    "/" + posixpath.normpath(self.workspace_path), include=["uv.toml", "pyproject.toml"]
-                )
-                raw = await read_workspace_indices(ws_dir)
+                raw = await read_workspace_indices(self._ws_dir())
                 span.set_attribute("indices.count", len(raw))
                 span.set_attribute("indices.names", [e["name"] for e in raw])
                 return raw

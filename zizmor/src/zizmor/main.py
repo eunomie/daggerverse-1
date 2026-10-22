@@ -33,9 +33,15 @@ class Zizmor:
         Doc("Container with zizmor installed."),
     ] = field()
 
+    source: Annotated[
+        Directory,
+        Doc("The workspace's `.github` directory containing Actions workflows."),
+    ] = field()
+
     @classmethod
     async def create(
         cls,
+        ws: Workspace,
         ctr: Annotated[
             Container | None,
             Doc("Container with zizmor installed. Defaults to the official ghcr.io/zizmorcore/zizmor image."),
@@ -47,14 +53,10 @@ class Zizmor:
     ) -> "Zizmor":
         if ctr is None:
             ctr = core().container().from_(f"{_DEFAULT_IMAGE}:{version}")
-        return cls(ctr=ctr)
+        return cls(ctr=ctr, source=ws.directory("/.github"))
 
-    def _container(
-        self,
-        source: Directory,
-        github_token: Secret | None = None,
-    ) -> Container:
-        ctr = self.ctr.with_workdir("/work").with_directory("/work/.github", source)
+    def _container(self, github_token: Secret | None = None) -> Container:
+        ctr = self.ctr.with_workdir("/work").with_directory("/work/.github", self.source)
 
         if github_token is not None:
             ctr = ctr.with_secret_variable("GH_TOKEN", github_token)
@@ -89,7 +91,6 @@ class Zizmor:
     @function
     async def lint(
         self,
-        ws: Workspace,
         github_token: Annotated[
             Secret | None,
             Doc("GitHub token for online audits. Without it, zizmor runs in offline mode."),
@@ -119,8 +120,7 @@ class Zizmor:
 
         Exits non-zero if findings above the configured severity are found.
         """
-        source = ws.directory("/.github")
-        ctr = self._container(source, github_token)
+        ctr = self._container(github_token)
         args = self._args(
             fix=None,
             persona=persona,
@@ -134,7 +134,6 @@ class Zizmor:
     @function
     async def fix(
         self,
-        ws: Workspace,
         mode: Annotated[
             FixMode,
             Doc("Which fixes to apply."),
@@ -164,8 +163,7 @@ class Zizmor:
 
         Returns a Changeset applied to the host.
         """
-        source = ws.directory("/.github")
-        ctr = self._container(source, github_token)
+        ctr = self._container(github_token)
         args = self._args(
             fix=mode,
             persona=persona,
@@ -179,6 +177,6 @@ class Zizmor:
         if output.strip():
             sys.stderr.write(output)
         fixed = result.directory("/work/.github")
-        before = core().directory().with_directory(".github", source)
+        before = core().directory().with_directory(".github", self.source)
         after = core().directory().with_directory(".github", fixed)
         return after.changes(before)

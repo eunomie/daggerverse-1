@@ -237,40 +237,48 @@ class Deptry:
     discovers every project in the source tree, and its `check` runs once per
     project, so one Dagger check covers a monorepo.
 
-    Reads the Dagger workspace it runs in, pulling only the files each operation
-    needs. To read a directory instead, pass `directory.as_workspace()`.
-
     Learn more about deptry at <https://deptry.com>.
     """
 
-    exclude: Annotated[
+    project_paths: Annotated[
         list[str],
-        Doc("Glob patterns of project paths to leave out of projects, e.g. **/tests/_packages/**."),
-    ] = field(default=list)
+        Doc("Paths of the projects deptry checks, relative to the workspace root."),
+    ] = field()
 
-    @function
-    async def projects(self, ws: Workspace) -> DeptryProjects:
-        """Every Python project deptry checks in the source tree.
+    @classmethod
+    async def create(
+        cls,
+        ws: Workspace,
+        exclude: Annotated[
+            list[str] | None,
+            Doc("Glob patterns of project paths to leave out of projects, e.g. **/tests/_packages/**."),
+        ] = None,
+    ) -> Deptry:
+        """Discover the projects: one per `pyproject.toml` that declares dependencies
+        (see `_project_info`) and either has its own package source or declares a
+        `[tool.deptry]` section. A project with no package of its own — e.g. a uv
+        workspace root that only aggregates members in subdirectories — is left
+        out, so `deptry .` never spills over the rest of the monorepo, unless its
+        `[tool.deptry]` section opts it in explicitly. Paths matching `exclude` are
+        left out too.
 
-        One entry per `pyproject.toml` that declares dependencies (see
-        `_project_info`) and either has its own package source or declares a
-        `[tool.deptry]` section. A project with no package of its own — e.g. a
-        uv workspace root that only aggregates members in subdirectories — is
-        left out, so `deptry .` never spills over the rest of the monorepo,
-        unless its `[tool.deptry]` section opts it in explicitly. Paths matching
-        `exclude` are left out too.
-
-        Projects are found by walking the workspace on the host, and only their
-        pyproject.toml files are loaded.
+        The workspace is walked on the host, and only the pyproject.toml files
+        are loaded.
         """
+        patterns = exclude or []
         cwd = await ws.cwd()
-        roots = await ws.find_roots(["pyproject.toml"], start="/", exclude=[*_EXCLUDE, *self.exclude])
+        roots = await ws.find_roots(["pyproject.toml"], start="/", exclude=[*_EXCLUDE, *patterns])
         paths: list[str] = []
         for path in sorted({_root_relative(cwd, root) for root in roots}):
-            if _is_excluded(path, self.exclude):
+            if _is_excluded(path, patterns):
                 continue
             pyproject = await ws.file(_root_path(path, "pyproject.toml")).contents()
             checkable, module, configured = _project_info(pyproject)
             if checkable and (configured or await _has_package_layout(ws, path, module)):
                 paths.append(path)
-        return DeptryProjects(paths=paths)
+        return cls(project_paths=paths)
+
+    @function
+    def projects(self) -> DeptryProjects:
+        """Every Python project deptry checks in the source tree."""
+        return DeptryProjects(paths=self.project_paths)

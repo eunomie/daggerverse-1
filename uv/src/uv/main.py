@@ -1,7 +1,7 @@
-from typing import Annotated
+from typing import Annotated, Self
 
 from dagger import Doc, collection, field, function, get, keys, object_type
-from dagger_clients.core import Workspace
+from dagger_clients.core import Directory, Workspace
 
 from uv.args import SOURCE_EXCLUDE, WorkspacePath
 from uv.utils import is_excluded, root_relative
@@ -22,11 +22,16 @@ class UvWorkspaces:
         Doc("uv workspace root paths (holding uv.lock), relative to the workspace root. `.` for the root."),
     ] = keys()
 
+    source: Annotated[
+        Directory,
+        Doc("Source tree containing the workspaces."),
+    ] = field()
+
     @function
     @get
     def workspace(self, path: WorkspacePath) -> UvWorkspaceSource:
         """The uv workspace rooted at `path`."""
-        return UvWorkspaceSource(path=path)
+        return UvWorkspaceSource(source=self.source, path=path)
 
 
 @object_type
@@ -36,15 +41,36 @@ class Uv:
     Hands out `UvWorkspaceSource` objects — one per workspace — which expose additional functionality.
     Use `workspace` to grab a single workspace by path or `workspaces` to get them all.
 
-    Reads the Dagger workspace it runs in, pulling only the files each operation
-    needs. To read a directory instead, pass `directory.as_workspace()`.
-
     Learn more in the [docs](https://daggerverse.docs.typesafe.ai/uv/)."""
 
-    exclude: Annotated[
+    source: Annotated[
+        Directory,
+        Doc("Source tree: the Dagger workspace, less caches, virtualenvs and gitignored files."),
+    ] = field()
+
+    workspace_paths: Annotated[
         list[str],
-        Doc("Glob patterns of workspace paths to leave out of workspaces, e.g. **/tests/_packages/**."),
-    ] = field(default=list)
+        Doc("Paths of the uv workspaces found in the source tree, relative to its root."),
+    ] = field()
+
+    @classmethod
+    async def create(
+        cls,
+        ws: Workspace,
+        exclude: Annotated[
+            list[str] | None,
+            Doc("Glob patterns of workspace paths to leave out of workspaces, e.g. **/tests/_packages/**."),
+        ] = None,
+    ) -> Self:
+        # Discovery walks the workspace on the host, so it loads no files.
+        patterns = exclude or []
+        cwd = await ws.cwd()
+        roots = await ws.find_roots(["uv.lock"], start="/", exclude=[*SOURCE_EXCLUDE, *patterns])
+        paths = sorted({root_relative(cwd, root) for root in roots})
+        return cls(
+            source=ws.directory("/", exclude=SOURCE_EXCLUDE, gitignore=True),
+            workspace_paths=[path for path in paths if not is_excluded(path, patterns)],
+        )
 
     @function
     def workspace(self, path: WorkspacePath) -> UvWorkspaceSource:
@@ -53,16 +79,9 @@ class Uv:
         The returned `UvWorkspaceSource` can `audit` its locked dependencies or
         `build` a minimal container for a package.
         """
-        return UvWorkspaceSource(path=path)
+        return UvWorkspaceSource(source=self.source, path=path)
 
     @function
-    async def workspaces(self, ws: Workspace) -> UvWorkspaces:
-        """Every uv workspace in the source tree (one per uv.lock), less those matching `exclude`.
-
-        Found by walking the workspace on the host, so no files are loaded to
-        discover them.
-        """
-        cwd = await ws.cwd()
-        roots = await ws.find_roots(["uv.lock"], start="/", exclude=[*SOURCE_EXCLUDE, *self.exclude])
-        paths = sorted({root_relative(cwd, root) for root in roots})
-        return UvWorkspaces(paths=[path for path in paths if not is_excluded(path, self.exclude)])
+    def workspaces(self) -> UvWorkspaces:
+        """Every uv workspace in the source tree (one per uv.lock), less those matching `exclude`."""
+        return UvWorkspaces(paths=self.workspace_paths, source=self.source)

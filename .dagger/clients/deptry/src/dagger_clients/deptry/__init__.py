@@ -44,29 +44,8 @@ class Deptry(_Type):
     `pyproject.toml`) and scans that project's source for imports to find
     unused, missing, misplaced or transitive dependencies. `projects`
     discovers every project in the source tree, and its `check` runs once
-    per project, so one Dagger check covers a monorepo.  Reads the Dagger
-    workspace it runs in, pulling only the files each operation needs. To
-    read a directory instead, pass `directory.as_workspace()`.  Learn more
-    about deptry at <https://deptry.com>.  """
-
-    async def exclude(self) -> list[str]:
-        """Returns
-        -------
-        list[str]
-            The `String` scalar type represents textual data, represented as
-            UTF-8 character sequences. The String type is most often used by
-            GraphQL to represent free-form human-readable text.
-
-        Raises
-        ------
-        ExecuteTimeoutError
-            If the time to execute the query exceeds the configured timeout.
-        QueryError
-            If the API returns an error.
-        """
-        _args: list[_Arg] = []
-        _ctx = self._select("exclude", _args)
-        return await _ctx.execute(list[str])
+    per project, so one Dagger check covers a monorepo.  Learn more about
+    deptry at <https://deptry.com>.  """
 
     async def id(self) -> str:
         """A unique identifier for this Deptry.
@@ -96,34 +75,30 @@ class Deptry(_Type):
         _ctx = self._select("id", _args)
         return await _ctx.execute(str)
 
-    def projects(self, ws: Workspace) -> "DeptryProjects":
+    async def project_paths(self) -> list[str]:
+        """Returns
+        -------
+        list[str]
+            The `String` scalar type represents textual data, represented as
+            UTF-8 character sequences. The String type is most often used by
+            GraphQL to represent free-form human-readable text.
+
+        Raises
+        ------
+        ExecuteTimeoutError
+            If the time to execute the query exceeds the configured timeout.
+        QueryError
+            If the API returns an error.
+        """
+        _args: list[_Arg] = []
+        _ctx = self._select("projectPaths", _args)
+        return await _ctx.execute(list[str])
+
+    def projects(self) -> "DeptryProjects":
         """
         Every Python project deptry checks in the source tree.
-
-        One entry per `pyproject.toml` that declares dependencies (see
-        `_project_info`) and either has its own package source or declares a
-        `[tool.deptry]` section. A project with no package of its own — e.g. a
-        uv workspace root that only aggregates members in subdirectories — is
-        left out, so `deptry .` never spills over the rest of the monorepo,
-        unless its `[tool.deptry]` section opts it in explicitly. Paths
-        matching
-        `exclude` are left out too.
-
-        Projects are found by walking the workspace on the host, and only
-        their
-        pyproject.toml files are loaded.
-
-        Parameters
-        ----------
-        ws:
-            A Dagger workspace detected from the current working directory or
-            constructed from a Directory.
         """
-        if not (isinstance(ws, Workspace)):
-            raise _type_error("Deptry.projects", "ws", ws, "Workspace")
-        _args = [
-            _Arg("ws", ws),
-        ]
+        _args: list[_Arg] = []
         _ctx = self._select("projects", _args)
         return DeptryProjects(_ctx)
 
@@ -308,34 +283,40 @@ class DeptryProjects(_Type):
 
 
 
-def deptry(*, exclude: list[str] | None = None, session: _Session | None = None,) -> Deptry:
+def deptry(ws: Workspace, *, exclude: list[str] | None = None, session: _Session | None = None,) -> Deptry:
     """
-    Linter for Python dependency issues.
-
-    deptry checks a single Python project: it reads the declared
+    Discover the projects: one per `pyproject.toml` that declares
     dependencies
-    (from a `pyproject.toml`) and scans that project's source for imports
-    to
-    find unused, missing, misplaced or transitive dependencies. `projects`
-    discovers every project in the source tree, and its `check` runs once
-    per
-    project, so one Dagger check covers a monorepo.
+    (see `_project_info`) and either has its own package source or
+    declares a
+    `[tool.deptry]` section. A project with no package of its own — e.g. a
+    uv
+    workspace root that only aggregates members in subdirectories — is
+    left
+    out, so `deptry .` never spills over the rest of the monorepo, unless
+    its
+    `[tool.deptry]` section opts it in explicitly. Paths matching
+    `exclude` are
+    left out too.
 
-    Reads the Dagger workspace it runs in, pulling only the files each
-    operation
-    needs. To read a directory instead, pass `directory.as_workspace()`.
-
-    Learn more about deptry at <https://deptry.com>.
+    The workspace is walked on the host, and only the pyproject.toml files
+    are loaded.
 
     Parameters
     ----------
+    ws:
+        A Dagger workspace detected from the current working directory or
+        constructed from a Directory.
     exclude:
         Glob patterns of project paths to leave out of projects, e.g.
         **/tests/_packages/**.
     """
+    if not (isinstance(ws, Workspace)):
+        raise _type_error("deptry", "ws", ws, "Workspace")
     if not (exclude is None or (isinstance(exclude, list) and all(isinstance(_v0, str) for _v0 in exclude))):
         raise _type_error("deptry", "exclude", exclude, "list[str] | None")
     _args = [
+        _Arg("ws", ws),
         _Arg("exclude", exclude, None),
     ]
     return _client_root(Deptry, _TARGET, "deptry", _args, session=session)

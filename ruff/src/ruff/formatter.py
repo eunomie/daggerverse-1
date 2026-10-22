@@ -2,9 +2,7 @@ import sys
 from typing import Annotated
 
 from dagger import Doc, check, field, function, object_type
-from dagger_clients.core import Changeset, Container, Directory, ReturnType, Workspace, core
-
-from ruff.args import ruff_container, source
+from dagger_clients.core import Changeset, Container, Directory, ReturnType, core
 
 
 @object_type
@@ -12,24 +10,22 @@ class RuffFormatter:
     """Ruff formatter (`ruff format`)."""
 
     ctr: Annotated[
-        Container | None,
-        Doc("Container with ruff installed. Defaults to the ruff image at `version`."),
-    ] = field(default=None)
+        Container,
+        Doc("Container with ruff installed."),
+    ] = field()
 
-    version: Annotated[
-        str | None,
-        Doc("Ruff image tag. Defaults to the version the workspace pins."),
-    ] = field(default=None)
+    source: Annotated[
+        Directory,
+        Doc("Source tree to run on."),
+    ] = field()
 
-    async def _container(self, ws: Workspace, source: Directory) -> Container:
-        ctr = await ruff_container(ws, self.ctr, self.version)
-        return ctr.with_workdir("/work").with_mounted_directory("/work", source)
+    def _container(self) -> Container:
+        return self.ctr.with_workdir("/work").with_mounted_directory("/work", self.source)
 
     @check
     @function
     async def lint(
         self,
-        ws: Workspace,
         extra_args: Annotated[
             list[str] | None,
             Doc("Additional arguments to pass to `ruff format --check`."),
@@ -43,12 +39,11 @@ class RuffFormatter:
         if extra_args:
             args.extend(extra_args)
         args.append(".")
-        await (await self._container(ws, source(ws))).with_exec(args).sync()
+        await self._container().with_exec(args).sync()
 
     @function
     async def fix(
         self,
-        ws: Workspace,
         extra_args: Annotated[
             list[str] | None,
             Doc("Additional arguments to pass to `ruff format`."),
@@ -59,8 +54,7 @@ class RuffFormatter:
         if extra_args:
             args.extend(extra_args)
         args.append(".")
-        before_dir = source(ws)
-        ctr = await self._container(ws, before_dir)
+        ctr = self._container()
         result = ctr.with_exec(args, expect=ReturnType.ANY)
         output = await result.combined_output()
         if output.strip():
@@ -72,7 +66,7 @@ class RuffFormatter:
                 "ruff reported an error (configuration, usage, or runtime). "
                 "See stderr above for ruff's output."
             )
-        before = core().directory().with_directory(".", before_dir)
+        before = core().directory().with_directory(".", self.source)
         fixed = result.directory("/work").without_directory(".ruff_cache")
         after = core().directory().with_directory(".", fixed)
         return after.changes(before)
