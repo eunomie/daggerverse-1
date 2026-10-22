@@ -5,14 +5,14 @@ from pathlib import PurePosixPath
 from typing import Annotated
 
 import dagger
-from dagger import Doc, dag, field, function, object_type
+from dagger import Doc, check, field, function, object_type
 from dagger.telemetry import get_tracer
+from dagger_clients.core import Container, Directory, File, ReturnType, core
 
 from uv.args import (
     AllExtras,
     AllGroups,
     AllPackages,
-    DaggerCodegen,
     Extra,
     Group,
     LockTimeout,
@@ -26,13 +26,13 @@ from uv.utils import (
     _UV_CACHE_DIR,
     debian_image_ref,
     extract_indices,
+    format_audit_failure,
     image_ref,
     parse_indices,
     parse_required_version_from_pyproject,
     parse_required_version_from_uv_toml,
     resolve_specifier,
 )
-from uv.workspace.audit import Audit
 from uv.workspace.build import UvWorkspaceBuild
 from uv.workspace.index import UvIndex, dicts_to_indices, merge_indices
 from uv.workspace.package import UvPackageSource
@@ -58,7 +58,7 @@ class UvWorkspaceSource:
     """
 
     source: Annotated[
-        dagger.Directory,
+        Directory,
         Doc("Source tree containing the workspace (and any sibling path-dependencies)."),
     ] = field()
 
@@ -67,11 +67,11 @@ class UvWorkspaceSource:
         Doc("Workspace root path (holding uv.lock/pyproject.toml) within `source`. `.` for a root workspace."),
     ] = field(default=".")
 
-    def _ws_dir(self) -> dagger.Directory:
+    def _ws_dir(self) -> Directory:
         """The workspace directory (`uv.lock`/`pyproject.toml` live here)."""
         return self.source if self.path == "." else self.source.directory(self.path)
 
-    async def _uv_toml(self) -> dagger.File | None:
+    async def _uv_toml(self) -> File | None:
         """The workspace's `uv.toml`, if one sits alongside its `uv.lock`."""
         ws = self._ws_dir()
         if "uv.toml" in await ws.entries():
@@ -207,6 +207,7 @@ class UvWorkspaceSource:
             package_path=path,
         )
 
+    @check
     @function
     async def audit(
         self,
@@ -221,25 +222,38 @@ class UvWorkspaceSource:
             str | None,
             Doc("Full uv image reference to audit with. Overrides `uv_version`."),
         ] = None,
-    ) -> Audit:
-        """Audit this workspace's locked dependencies.
+    ) -> None:
+        """Run `uv audit --frozen` on this workspace's locked dependencies.
 
-        The image is resolved here (explicit `image` > `image_ref(uv_version)` >
-        the version detected from the workspace) and handed to a container-bound
-        `Audit`; resolving an image *tag* is pure string work, so this type stays
-        container-free.
+        Audits straight from the committed uv.lock without re-resolving against
+        package indexes (`--frozen`); vulnerability data comes from the public
+        OSV service, so no index credentials are required. Only the files uv
+        reads are mounted: uv.lock, uv.toml and every pyproject.toml, since a
+        workspace's members must be present for uv to load it.
+
+        The image is resolved here: explicit `image` > `image_ref(uv_version)` >
+        the version detected from the workspace.
         """
         resolved = image if image is not None else image_ref(uv_version or await self.uv_version())
-        ws = self._ws_dir()
-        return Audit(
-            uv_lock=ws.file("uv.lock"),
-            pyproject=ws.file("pyproject.toml"),
-            image=resolved,
-            uv_toml=await self._uv_toml(),
+        ctr = (
+            core()
+            .container()
+            .from_(resolved)
+            # the bare astral image ships uv at /uv (not on PATH); prepending /
+            # makes a plain `uv` work for both it and images with uv on PATH.
+            .with_env_variable("PATH", "/:${PATH}", expand=True)
+            .with_directory("/work", self._ws_dir(), include=["uv.lock", "uv.toml", "**/pyproject.toml"])
+            .with_workdir("/work")
         )
+        try:
+            await ctr.with_exec(["uv", "audit", "--frozen"]).sync()
+        except dagger.ExecError as exc:
+            # The ExecError itself stringifies to a bare "exit code N"; fold uv's
+            # report into the check's error so the findings show up there.
+            raise RuntimeError(format_audit_failure(exc.exit_code, exc.stdout, exc.stderr, self.path)) from exc
 
     @staticmethod
-    async def _has_cache(ctr: dagger.Container, path: str) -> bool:
+    async def _has_cache(ctr: Container, path: str) -> bool:
         """Whether `path` already holds a populated uv cache in the container.
 
         A deliberately prepared base may ship a warm cache baked at `UV_CACHE_DIR`;
@@ -252,15 +266,15 @@ class UvWorkspaceSource:
             return False
 
     @staticmethod
-    async def _has_uv(ctr: dagger.Container) -> bool:
+    async def _has_uv(ctr: Container) -> bool:
         """Check whether uv is on $PATH in the given container."""
         with get_tracer().start_as_current_span("detect uv on PATH") as span:
-            exit_code = await ctr.with_exec(["sh", "-c", "command -v uv"], expect=dagger.ReturnType.ANY).exit_code()
+            exit_code = await ctr.with_exec(["sh", "-c", "command -v uv"], expect=ReturnType.ANY).exit_code()
             found = exit_code == 0
             span.set_attribute("uv.found", found)
             return found
 
-    async def _default_base_container(self) -> dagger.Container:
+    async def _default_base_container(self) -> Container:
         """A Debian-based uv image pinned to this workspace's uv version.
 
         Uses the Debian variant rather than the distroless `uv:<version>` image
@@ -269,13 +283,13 @@ class UvWorkspaceSource:
         ca-certificates are already present. Pass an explicit `base_container` to
         build on your own auth/system-package layers.
         """
-        return dag.container().from_(debian_image_ref(await self.uv_version())).with_workdir("/work")
+        return core().container().from_(debian_image_ref(await self.uv_version())).with_workdir("/work")
 
     @function
     async def build(
         self,
         base_container: Annotated[
-            dagger.Container | None,
+            Container | None,
             Doc(
                 "Container to build on top of (auth, system packages, etc.). Defaults to "
                 "a Debian-based uv image at the workspace's uv version (uv provisions Python on demand)."
@@ -287,7 +301,6 @@ class UvWorkspaceSource:
         all_extras: AllExtras = False,
         all_groups: AllGroups = False,
         all_packages: AllPackages = False,
-        dagger_codegen: DaggerCodegen = True,
         no_editable: NoEditable = False,
         auto_install_uv: Annotated[
             bool,
@@ -322,7 +335,6 @@ class UvWorkspaceSource:
                 all_extras=all_extras,
                 all_groups=all_groups,
                 all_packages=all_packages,
-                dagger_codegen=dagger_codegen,
                 no_editable=no_editable,
             )
             span.set_attribute("uv.sync_args", plan.uv_sync_args)
@@ -339,11 +351,11 @@ class UvWorkspaceSource:
                 # `uv sync` would materialize the cache into a real image layer
                 # (non-reproducible, ~2x size) instead of writing to the volume.
                 if not await self._has_cache(ctr, cache_dir):
-                    ctr = ctr.with_mounted_cache(cache_dir, dag.cache_volume("uv-cache"))
+                    ctr = ctr.with_mounted_cache(cache_dir, core().cache_volume("uv-cache"))
             else:
                 cache_dir = _UV_CACHE_DIR
                 ctr = ctr.with_env_variable("UV_CACHE_DIR", cache_dir).with_mounted_cache(
-                    cache_dir, dag.cache_volume("uv-cache")
+                    cache_dir, core().cache_volume("uv-cache")
                 )
             workdir = await ctr.workdir()
 
@@ -376,7 +388,7 @@ class UvWorkspaceSource:
     async def install(
         self,
         base_container: Annotated[
-            dagger.Container | None,
+            Container | None,
             Doc(
                 "Container to build on (auth, system packages, etc.). Defaults to "
                 "a Debian-based uv image at the workspace's uv version (uv provisions Python on demand)."
@@ -388,7 +400,6 @@ class UvWorkspaceSource:
         all_extras: AllExtras = False,
         all_groups: AllGroups = False,
         all_packages: AllPackages = False,
-        dagger_codegen: DaggerCodegen = True,
         no_editable: NoEditable = False,
         prune_cache: PruneCache = True,
         max_cache_size: MaxCacheSize = 100,
@@ -408,7 +419,7 @@ class UvWorkspaceSource:
                 "Set to False if your base_container already ships uv."
             ),
         ] = True,
-    ) -> dagger.Container:
+    ) -> Container:
         """Build a minimal container with deps installed for the given package(s).
 
         Convenience method composing `build`, optionally `with_venv`,
@@ -424,7 +435,6 @@ class UvWorkspaceSource:
             all_extras=all_extras,
             all_groups=all_groups,
             all_packages=all_packages,
-            dagger_codegen=dagger_codegen,
             no_editable=no_editable,
             auto_install_uv=auto_install_uv,
         )
@@ -440,7 +450,7 @@ class UvWorkspaceSource:
     async def venv(
         self,
         base_container: Annotated[
-            dagger.Container | None,
+            Container | None,
             Doc("Container to build on; defaults to a Debian-based uv image at the workspace's uv version."),
         ] = None,
         package: Package | None = None,
@@ -449,7 +459,6 @@ class UvWorkspaceSource:
         all_extras: AllExtras = False,
         all_groups: AllGroups = False,
         all_packages: AllPackages = False,
-        dagger_codegen: DaggerCodegen = True,
         no_editable: NoEditable = False,
         prune_cache: PruneCache = True,
         max_cache_size: MaxCacheSize = 100,
@@ -478,7 +487,6 @@ class UvWorkspaceSource:
             all_extras=all_extras,
             all_groups=all_groups,
             all_packages=all_packages,
-            dagger_codegen=dagger_codegen,
             no_editable=no_editable,
             auto_install_uv=auto_install_uv,
         )

@@ -1,12 +1,12 @@
 from typing import Annotated, TypeAlias
 
-import dagger
 from dagger import DefaultPath, Doc, Ignore
+from dagger_clients.core import Directory
 
 SourceDir = Annotated[
-    dagger.Directory,
+    Directory,
     Doc("Source directory."),
-    DefaultPath("."),
+    DefaultPath("/"),
     Ignore(
         [
             "**/__pycache__",
@@ -24,7 +24,6 @@ SourceDir = Annotated[
             "**/dist",
             "**/build",
             "**/*.egg-info",
-            "**/sdk",
         ]
     ),
 ]
@@ -67,15 +66,6 @@ AllGroups: TypeAlias = Annotated[
 AllPackages: TypeAlias = Annotated[
     bool,
     Doc("Install every workspace member; maps to `uv sync --all-packages`"),
-]
-
-DaggerCodegen: TypeAlias = Annotated[
-    bool,
-    Doc(
-        "If True (default), and the package being built has a "
-        "`dagger.json`, run Dagger codegen and overlay the generated "
-        "SDK before `uv sync`. No-op for non-Dagger projects."
-    ),
 ]
 
 PruneCache: TypeAlias = Annotated[

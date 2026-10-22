@@ -1,12 +1,12 @@
 from typing import Annotated
 
-import dagger
 from dagger import DefaultPath, Doc, Ignore
+from dagger_clients.core import Directory
 
 SourceDir = Annotated[
-    dagger.Directory,
+    Directory,
     Doc("Project source directory."),
-    DefaultPath("."),
+    DefaultPath("/"),
     Ignore(
         [
             "**/__pycache__",

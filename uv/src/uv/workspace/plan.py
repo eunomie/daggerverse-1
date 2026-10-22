@@ -3,9 +3,9 @@ import tomllib
 from collections import OrderedDict
 from typing import Annotated, Self
 
-import dagger
 from dagger import Doc, field, object_type
 from dagger.telemetry import get_tracer
+from dagger_clients.core import Directory
 
 from uv.utils import (
     build_uv_sync_args,
@@ -15,7 +15,6 @@ from uv.utils import (
     parse_project_name,
     require_package_selection,
 )
-from uv.workspace._codegen import dagger_codegen as _run_codegen
 from uv.workspace.uv_build import UvBuildLayout
 
 
@@ -60,8 +59,8 @@ async def _discover_local_packages(
     all_packages: bool,
     default_package: str | None,
     workspace_path: str,
-    source_dir: dagger.Directory,
-    ws_dir: dagger.Directory,
+    source_dir: Directory,
+    ws_dir: Directory,
 ) -> tuple[OrderedDict[str, str], OrderedDict[str, str], dict[str, bool]]:
     """Find reachable local packages and detect each one's layout (flat vs src).
 
@@ -152,13 +151,13 @@ class UvSyncPlan:
     """Resolved build configuration for a uv workspace sync."""
 
     ws_dir: Annotated[
-        dagger.Directory,
-        Doc("Resolved workspace directory (with codegen overlay if applicable)"),
+        Directory,
+        Doc("Resolved workspace directory"),
     ] = field()
 
     source_dir: Annotated[
-        dagger.Directory,
-        Doc("Full source directory (with codegen overlay if applicable)"),
+        Directory,
+        Doc("Full source directory"),
     ] = field()
 
     workspace_path: Annotated[
@@ -194,7 +193,7 @@ class UvSyncPlan:
     @classmethod
     async def create(
         cls,
-        source_dir: dagger.Directory,
+        source_dir: Directory,
         workspace_path: str = ".",
         package: list[str] | None = None,
         extra: list[str] | None = None,
@@ -202,7 +201,6 @@ class UvSyncPlan:
         all_extras: bool = False,
         all_groups: bool = False,
         all_packages: bool = False,
-        dagger_codegen: bool = True,
         no_editable: bool = False,
     ) -> Self:
         """Parse uv.lock and resolve all build configuration up front."""
@@ -216,21 +214,6 @@ class UvSyncPlan:
         default_package = normalize_package_name(root_name) if root_name else None
         # Fail fast on a pure workspace root with no selection (nothing to install).
         require_package_selection(packages, all_packages, default_package)
-
-        # Run Dagger codegen BEFORE reachability filtering so generated directories
-        # (e.g. sdk/) are visible to the filter.  Without this, CI builds
-        # (where sdk/ is gitignored) silently drop dagger-io from the plan.
-        if dagger_codegen:
-            raw_local = parse_local_packages(lock_data)
-            # Overlay each target package's SDK (deduped); fall back to the
-            # workspace root when no target is a local package.
-            codegen_paths = list(dict.fromkeys(raw_local[p] for p in packages if p in raw_local)) or ["."]
-            for codegen_path in codegen_paths:
-                ws_dir = await _run_codegen(ws_dir, codegen_path)
-            if workspace_path == ".":
-                source_dir = ws_dir
-            else:
-                source_dir = source_dir.with_directory(workspace_path, ws_dir)
 
         all_local, needed_local, flat_flags = await _discover_local_packages(
             lock_data, packages, all_packages, default_package, workspace_path, source_dir, ws_dir
