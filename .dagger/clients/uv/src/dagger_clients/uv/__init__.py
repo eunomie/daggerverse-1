@@ -32,6 +32,7 @@ from dagger_clients.core import (  # noqa: E402
     Check,
     Container,
     Directory,
+    Workspace,
 )
 
 _TARGET = _Target(name=NAME, ref=REF, pin=PIN)
@@ -44,28 +45,6 @@ class Uv(_Type):
     Use `workspace` to grab a single workspace by path or `workspaces` to
     get them all.  Learn more in the
     [docs](https://daggerverse.docs.typesafe.ai/uv/).  """
-
-    async def exclude(self) -> list[str]:
-        """Glob patterns (source-relative) of workspace paths to leave out of
-        workspaces, e.g. **/tests/_packages/**.
-
-        Returns
-        -------
-        list[str]
-            The `String` scalar type represents textual data, represented as
-            UTF-8 character sequences. The String type is most often used by
-            GraphQL to represent free-form human-readable text.
-
-        Raises
-        ------
-        ExecuteTimeoutError
-            If the time to execute the query exceeds the configured timeout.
-        QueryError
-            If the API returns an error.
-        """
-        _args: list[_Arg] = []
-        _ctx = self._select("exclude", _args)
-        return await _ctx.execute(list[str])
 
     async def id(self) -> str:
         """A unique identifier for this Uv.
@@ -96,14 +75,16 @@ class Uv(_Type):
         return await _ctx.execute(str)
 
     def source(self) -> Directory:
-        """Source directory."""
+        """Source tree: the Dagger workspace, less caches, virtualenvs and
+        gitignored files.
+        """
         _args: list[_Arg] = []
         _ctx = self._select("source", _args)
         return Directory(_ctx)
 
     def workspace(self, path: str) -> "UvWorkspaceSource":
         """
-        A single uv workspace at `path` within the source tree.
+        A single uv workspace at `path`, relative to the workspace root.
 
         The returned `UvWorkspaceSource` can `audit` its locked dependencies
         or
@@ -112,8 +93,8 @@ class Uv(_Type):
         Parameters
         ----------
         path:
-            Path to the workspace root (holding uv.lock and pyproject.toml)
-            within the source directory.
+            Path to the uv workspace root (holding uv.lock and
+            pyproject.toml), relative to the workspace root.
         """
         if not (isinstance(path, str)):
             raise _type_error("Uv.workspace", "path", path, "str")
@@ -122,6 +103,28 @@ class Uv(_Type):
         ]
         _ctx = self._select("workspace", _args)
         return UvWorkspaceSource(_ctx)
+
+    async def workspace_paths(self) -> list[str]:
+        """Paths of the uv workspaces found in the source tree, relative to its
+        root.
+
+        Returns
+        -------
+        list[str]
+            The `String` scalar type represents textual data, represented as
+            UTF-8 character sequences. The String type is most often used by
+            GraphQL to represent free-form human-readable text.
+
+        Raises
+        ------
+        ExecuteTimeoutError
+            If the time to execute the query exceeds the configured timeout.
+        QueryError
+            If the API returns an error.
+        """
+        _args: list[_Arg] = []
+        _ctx = self._select("workspacePaths", _args)
+        return await _ctx.execute(list[str])
 
     def workspaces(self) -> "UvWorkspaces":
         """
@@ -1242,17 +1245,17 @@ class UvWorkspaceBuild(_Type):
 class UvWorkspaceSource(_Type):
     """ A self-contained uv workspace: the source files rooted at a
     `uv.lock`.  Carries the source tree and the workspace's path within it
-    (`"."` for a root workspace). From those it derives everything it
-    needs to `audit` the locked dependencies or `build` a minimal
-    container for a package — keeping the parent `Uv` a thin, container-
-    free entrypoint.  The full `source` (rather than just the sliced
-    workspace directory) is carried so builds can reach sibling path-
-    dependencies that live *outside* the workspace root (e.g. `../my-dep`
-    in a nested workspace).  Named `UvWorkspaceSource` (not `UvWorkspace`)
-    to avoid colliding with the top-level `Uv` constructor when composed
-    in a parent module.  """
+    (`"."` for a root workspace), relative to the Dagger workspace root.
+    From those it derives everything it needs to `audit` the locked
+    dependencies or `build` a minimal container for a package — keeping
+    the parent `Uv` a thin, container-free entrypoint.  The full `source`
+    (rather than just the sliced workspace directory) is carried so builds
+    can reach sibling path-dependencies that live *outside* the workspace
+    root (e.g. `../my-dep` in a nested workspace).  Named
+    `UvWorkspaceSource` (not `UvWorkspace`) to avoid colliding with the
+    top-level `Uv` constructor when composed in a parent module.  """
 
-    def audit(self, *, uv_version: str | None = None, image: str | None = None,) -> Check:
+    def audit(self, ws: Workspace, *, uv_version: str | None = None, image: str | None = None,) -> Check:
         """
         Run `uv audit --frozen` on this workspace's locked dependencies.
 
@@ -1260,8 +1263,9 @@ class UvWorkspaceSource(_Type):
         against
         package indexes (`--frozen`); vulnerability data comes from the public
         OSV service, so no index credentials are required. Only the files uv
-        reads are mounted: uv.lock, uv.toml and every pyproject.toml, since a
-        workspace's members must be present for uv to load it.
+        reads are loaded from the Dagger workspace: uv.lock, uv.toml and every
+        pyproject.toml, since a workspace's members must be present for uv to
+        load it.
 
         The image is resolved here: explicit `image` > `image_ref(uv_version)`
         >
@@ -1269,17 +1273,23 @@ class UvWorkspaceSource(_Type):
 
         Parameters
         ----------
+        ws:
+            A Dagger workspace detected from the current working directory or
+            constructed from a Directory.
         uv_version:
             uv version (image tag) to audit with. Defaults to the version
             detected from the workspace; ignored when `image` is set.
         image:
             Full uv image reference to audit with. Overrides `uv_version`.
         """
+        if not (isinstance(ws, Workspace)):
+            raise _type_error("UvWorkspaceSource.audit", "ws", ws, "Workspace")
         if not (uv_version is None or isinstance(uv_version, str)):
             raise _type_error("UvWorkspaceSource.audit", "uv_version", uv_version, "str | None")
         if not (image is None or isinstance(image, str)):
             raise _type_error("UvWorkspaceSource.audit", "image", image, "str | None")
         _args = [
+            _Arg("ws", ws),
             _Arg("uvVersion", uv_version, None),
             _Arg("image", image, None),
         ]
@@ -1797,7 +1807,7 @@ class UvWorkspaces(_Type):
 
 
 
-def uv(*, source: Directory | None = None, exclude: list[str] | None = None, session: _Session | None = None,) -> Uv:
+def uv(ws: Workspace, *, exclude: list[str] | None = None, session: _Session | None = None,) -> Uv:
     """
     Entrypoint for the `uv` module.
 
@@ -1810,18 +1820,19 @@ def uv(*, source: Directory | None = None, exclude: list[str] | None = None, ses
 
     Parameters
     ----------
-    source:
-        Source directory.
+    ws:
+        A Dagger workspace detected from the current working directory or
+        constructed from a Directory.
     exclude:
-        Glob patterns (source-relative) of workspace paths to leave out of
-        workspaces, e.g. **/tests/_packages/**.
+        Glob patterns of workspace paths to leave out of workspaces, e.g.
+        **/tests/_packages/**.
     """
-    if not (source is None or isinstance(source, Directory)):
-        raise _type_error("uv", "source", source, "Directory | None")
+    if not (isinstance(ws, Workspace)):
+        raise _type_error("uv", "ws", ws, "Workspace")
     if not (exclude is None or (isinstance(exclude, list) and all(isinstance(_v0, str) for _v0 in exclude))):
         raise _type_error("uv", "exclude", exclude, "list[str] | None")
     _args = [
-        _Arg("source", source, None),
+        _Arg("ws", ws),
         _Arg("exclude", exclude, None),
     ]
     return _client_root(Uv, _TARGET, "uv", _args, session=session)

@@ -31,7 +31,7 @@ _check_core(NAME, CORE_DIGEST, _installed_core)
 from dagger_clients.core import (  # noqa: E402
     Check,
     Container,
-    Directory,
+    Workspace,
 )
 
 _TARGET = _Target(name=NAME, ref=REF, pin=PIN)
@@ -46,25 +46,6 @@ class Deptry(_Type):
     discovers every project in the source tree, and its `check` runs once
     per project, so one Dagger check covers a monorepo.  Learn more about
     deptry at <https://deptry.com>.  """
-
-    async def exclude(self) -> list[str]:
-        """Returns
-        -------
-        list[str]
-            The `String` scalar type represents textual data, represented as
-            UTF-8 character sequences. The String type is most often used by
-            GraphQL to represent free-form human-readable text.
-
-        Raises
-        ------
-        ExecuteTimeoutError
-            If the time to execute the query exceeds the configured timeout.
-        QueryError
-            If the API returns an error.
-        """
-        _args: list[_Arg] = []
-        _ctx = self._select("exclude", _args)
-        return await _ctx.execute(list[str])
 
     async def id(self) -> str:
         """A unique identifier for this Deptry.
@@ -94,38 +75,48 @@ class Deptry(_Type):
         _ctx = self._select("id", _args)
         return await _ctx.execute(str)
 
+    async def project_paths(self) -> list[str]:
+        """Returns
+        -------
+        list[str]
+            The `String` scalar type represents textual data, represented as
+            UTF-8 character sequences. The String type is most often used by
+            GraphQL to represent free-form human-readable text.
+
+        Raises
+        ------
+        ExecuteTimeoutError
+            If the time to execute the query exceeds the configured timeout.
+        QueryError
+            If the API returns an error.
+        """
+        _args: list[_Arg] = []
+        _ctx = self._select("projectPaths", _args)
+        return await _ctx.execute(list[str])
+
     def projects(self) -> "DeptryProjects":
         """
         Every Python project deptry checks in the source tree.
-
-        One entry per `pyproject.toml` that declares dependencies (see
-        `_project_info`) and either has its own package source or declares a
-        `[tool.deptry]` section. A project with no package of its own — e.g. a
-        uv workspace root that only aggregates members in subdirectories — is
-        left out, so `deptry .` never spills over the rest of the monorepo,
-        unless its `[tool.deptry]` section opts it in explicitly. Paths
-        matching
-        `exclude` are left out too.
         """
         _args: list[_Arg] = []
         _ctx = self._select("projects", _args)
         return DeptryProjects(_ctx)
 
-    def source(self) -> Directory:
-        _args: list[_Arg] = []
-        _ctx = self._select("source", _args)
-        return Directory(_ctx)
-
 
 class DeptryProject(_Type):
     """ One Python project that deptry checks.  """
 
-    def check(self, *, version: str = '0.25.1', ctr: Container | None = None, args: list[str] | None = None,) -> Check:
+    def check(self, ws: Workspace, *, version: str = '0.25.1', ctr: Container | None = None, args: list[str] | None = None,) -> Check:
         """
         Run `deptry .` in this project and fail on any dependency issue.
 
+        Only this project's directory is loaded from the workspace.
+
         Parameters
         ----------
+        ws:
+            A Dagger workspace detected from the current working directory or
+            constructed from a Directory.
         version:
             deptry version to use (ignored when `ctr` is set).
         ctr:
@@ -136,6 +127,8 @@ class DeptryProject(_Type):
             Additional arguments to pass to deptry (added before the project
             root).
         """
+        if not (isinstance(ws, Workspace)):
+            raise _type_error("DeptryProject.check", "ws", ws, "Workspace")
         if not (isinstance(version, str)):
             raise _type_error("DeptryProject.check", "version", version, "str")
         if not (ctr is None or isinstance(ctr, Container)):
@@ -143,6 +136,7 @@ class DeptryProject(_Type):
         if not (args is None or (isinstance(args, list) and all(isinstance(_v0, str) for _v0 in args))):
             raise _type_error("DeptryProject.check", "args", args, "list[str] | None")
         _args = [
+            _Arg("ws", ws),
             _Arg("version", version, '0.25.1'),
             _Arg("ctr", ctr, None),
             _Arg("args", args, None),
@@ -178,25 +172,6 @@ class DeptryProject(_Type):
         _ctx = self._select("id", _args)
         return await _ctx.execute(str)
 
-    async def module(self) -> str | None:
-        """Returns
-        -------
-        str | None
-            The `String` scalar type represents textual data, represented as
-            UTF-8 character sequences. The String type is most often used by
-            GraphQL to represent free-form human-readable text.
-
-        Raises
-        ------
-        ExecuteTimeoutError
-            If the time to execute the query exceeds the configured timeout.
-        QueryError
-            If the API returns an error.
-        """
-        _args: list[_Arg] = []
-        _ctx = self._select("module", _args)
-        return await _ctx.execute(str | None)
-
     async def path(self) -> str:
         """Returns
         -------
@@ -215,11 +190,6 @@ class DeptryProject(_Type):
         _args: list[_Arg] = []
         _ctx = self._select("path", _args)
         return await _ctx.execute(str)
-
-    def source(self) -> Directory:
-        _args: list[_Arg] = []
-        _ctx = self._select("source", _args)
-        return Directory(_ctx)
 
 
 class DeptryProjects(_Type):
@@ -313,35 +283,40 @@ class DeptryProjects(_Type):
 
 
 
-def deptry(*, source: Directory | None = None, exclude: list[str] | None = None, session: _Session | None = None,) -> Deptry:
+def deptry(ws: Workspace, *, exclude: list[str] | None = None, session: _Session | None = None,) -> Deptry:
     """
-    Linter for Python dependency issues.
-
-    deptry checks a single Python project: it reads the declared
+    Discover the projects: one per `pyproject.toml` that declares
     dependencies
-    (from a `pyproject.toml`) and scans that project's source for imports
-    to
-    find unused, missing, misplaced or transitive dependencies. `projects`
-    discovers every project in the source tree, and its `check` runs once
-    per
-    project, so one Dagger check covers a monorepo.
+    (see `_project_info`) and either has its own package source or
+    declares a
+    `[tool.deptry]` section. A project with no package of its own — e.g. a
+    uv
+    workspace root that only aggregates members in subdirectories — is
+    left
+    out, so `deptry .` never spills over the rest of the monorepo, unless
+    its
+    `[tool.deptry]` section opts it in explicitly. Paths matching
+    `exclude` are
+    left out too.
 
-    Learn more about deptry at <https://deptry.com>.
+    The workspace is walked on the host, and only the pyproject.toml files
+    are loaded.
 
     Parameters
     ----------
-    source:
-        Source directory.
+    ws:
+        A Dagger workspace detected from the current working directory or
+        constructed from a Directory.
     exclude:
-        Glob patterns (source-relative) of project paths to leave out of
-        projects, e.g. **/tests/_packages/**.
+        Glob patterns of project paths to leave out of projects, e.g.
+        **/tests/_packages/**.
     """
-    if not (source is None or isinstance(source, Directory)):
-        raise _type_error("deptry", "source", source, "Directory | None")
+    if not (isinstance(ws, Workspace)):
+        raise _type_error("deptry", "ws", ws, "Workspace")
     if not (exclude is None or (isinstance(exclude, list) and all(isinstance(_v0, str) for _v0 in exclude))):
         raise _type_error("deptry", "exclude", exclude, "list[str] | None")
     _args = [
-        _Arg("source", source, None),
+        _Arg("ws", ws),
         _Arg("exclude", exclude, None),
     ]
     return _client_root(Deptry, _TARGET, "deptry", _args, session=session)

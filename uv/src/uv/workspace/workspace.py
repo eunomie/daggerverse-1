@@ -7,7 +7,7 @@ from typing import Annotated
 import dagger
 from dagger import Doc, check, field, function, object_type
 from dagger.telemetry import get_tracer
-from dagger_clients.core import Container, Directory, File, ReturnType, core
+from dagger_clients.core import Container, Directory, File, ReturnType, Workspace, core
 
 from uv.args import (
     AllExtras,
@@ -25,7 +25,6 @@ from uv.utils import (
     _DEFAULT_VERSION,
     _UV_CACHE_DIR,
     debian_image_ref,
-    extract_indices,
     format_audit_failure,
     image_ref,
     parse_indices,
@@ -34,7 +33,7 @@ from uv.utils import (
     resolve_specifier,
 )
 from uv.workspace.build import UvWorkspaceBuild
-from uv.workspace.index import UvIndex, dicts_to_indices, merge_indices
+from uv.workspace.index import UvIndex, dicts_to_indices, merge_indices, read_workspace_indices
 from uv.workspace.package import UvPackageSource
 from uv.workspace.plan import UvSyncPlan
 from uv.workspace.venv import UvVenv
@@ -45,7 +44,7 @@ class UvWorkspaceSource:
     """A self-contained uv workspace: the source files rooted at a `uv.lock`.
 
     Carries the source tree and the workspace's path within it (`"."` for a
-    root workspace). From those it derives everything it needs to `audit` the
+    root workspace), relative to the Dagger workspace root. From those it derives everything it needs to `audit` the
     locked dependencies or `build` a minimal container for a package — keeping
     the parent `Uv` a thin, container-free entrypoint.
 
@@ -155,15 +154,11 @@ class UvWorkspaceSource:
         tracer = get_tracer()
         ws = self._ws_dir()
 
-        uv_toml = await self._uv_toml()
         pyproject_data = tomllib.loads(await ws.file("pyproject.toml").contents())
 
         with tracer.start_as_current_span("read workspace indices") as ws_span:
             ws_span.set_attribute("workspace.path", self.path)
-            if uv_toml is not None:
-                ws_raw = parse_indices(await uv_toml.contents(), uv_toml=True)
-            else:
-                ws_raw = extract_indices(pyproject_data)
+            ws_raw = await read_workspace_indices(ws)
             ws_span.set_attribute("indices.count", len(ws_raw))
             ws_span.set_attribute("indices.names", [e["name"] for e in ws_raw])
 
@@ -211,6 +206,7 @@ class UvWorkspaceSource:
     @function
     async def audit(
         self,
+        ws: Workspace,
         uv_version: Annotated[
             str | None,
             Doc(
@@ -228,8 +224,9 @@ class UvWorkspaceSource:
         Audits straight from the committed uv.lock without re-resolving against
         package indexes (`--frozen`); vulnerability data comes from the public
         OSV service, so no index credentials are required. Only the files uv
-        reads are mounted: uv.lock, uv.toml and every pyproject.toml, since a
-        workspace's members must be present for uv to load it.
+        reads are loaded from the Dagger workspace: uv.lock, uv.toml and every
+        pyproject.toml, since a workspace's members must be present for uv to
+        load it.
 
         The image is resolved here: explicit `image` > `image_ref(uv_version)` >
         the version detected from the workspace.
@@ -242,7 +239,14 @@ class UvWorkspaceSource:
             # the bare astral image ships uv at /uv (not on PATH); prepending /
             # makes a plain `uv` work for both it and images with uv on PATH.
             .with_env_variable("PATH", "/:${PATH}", expand=True)
-            .with_directory("/work", self._ws_dir(), include=["uv.lock", "uv.toml", "**/pyproject.toml"])
+            .with_directory(
+                "/work",
+                ws.directory(
+                    "/" + posixpath.normpath(self.path),
+                    include=["uv.lock", "uv.toml", "**/pyproject.toml"],
+                    gitignore=True,
+                ),
+            )
             .with_workdir("/work")
         )
         try:

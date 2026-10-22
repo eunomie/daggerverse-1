@@ -5,10 +5,10 @@ type ModuleTypes {
     [
       typeDef.withObject("Zizmor", description: "Static analysis for GitHub Actions security.")
         .withField("ctr", typeDef.withObject("Container"), description: "Container with zizmor installed.")
+        .withField("source", typeDef.withObject("Directory"), description: "The workspace's `.github` directory containing Actions workflows.")
         .withFunction(
           function("fix", typeDef.withObject("Changeset"))
             .withDescription("Auto-fix GitHub Actions security issues found by zizmor.\n\nReturns a Changeset applied to the host.")
-            .withArg("source", typeDef.withObject("Directory"), description: "The `.github` directory containing Actions workflows.", defaultPath: "/.github")
             .withArg("mode", typeDef.withEnum("FixMode", description: "Which fixes to apply."), description: "Which fixes to apply.", defaultValue: ("\"SAFE\"" :: Dagger.JSON!))
             .withArg("github_token", typeDef.withOptional(true).withObject("Secret").withOptional(true), description: "GitHub token for online audits. Without it, zizmor runs in offline mode.", defaultValue: ("null" :: Dagger.JSON!))
             .withArg("persona", typeDef.withKind(TypeDefKind.STRING_KIND), description: "Sensitivity level: regular, pedantic, or auditor.", defaultValue: ("\"regular\"" :: Dagger.JSON!))
@@ -20,7 +20,6 @@ type ModuleTypes {
           function("lint", typeDef.withOptional(true).withKind(TypeDefKind.VOID_KIND))
             .withDescription("Run zizmor on GitHub Actions workflow files.\n\nExits non-zero if findings above the configured severity are found.")
             .withCheck
-            .withArg("source", typeDef.withObject("Directory"), description: "The `.github` directory containing Actions workflows.", defaultPath: "/.github")
             .withArg("github_token", typeDef.withOptional(true).withObject("Secret").withOptional(true), description: "GitHub token for online audits. Without it, zizmor runs in offline mode.", defaultValue: ("null" :: Dagger.JSON!))
             .withArg("format", typeDef.withKind(TypeDefKind.STRING_KIND), description: "Output format: plain, json, sarif, or github.", defaultValue: ("\"plain\"" :: Dagger.JSON!))
             .withArg("persona", typeDef.withKind(TypeDefKind.STRING_KIND), description: "Sensitivity level: regular, pedantic, or auditor.", defaultValue: ("\"regular\"" :: Dagger.JSON!))
@@ -30,6 +29,7 @@ type ModuleTypes {
         )
         .withConstructor(
           function("", typeDef.withObject("Zizmor"))
+            .withArg("ws", typeDef.withObject("Workspace"), description: "A Dagger workspace detected from the current working directory or\nconstructed from a Directory.")
             .withArg("ctr", typeDef.withOptional(true).withObject("Container").withOptional(true), description: "Container with zizmor installed. Defaults to the official ghcr.io/zizmorcore/zizmor image.", defaultValue: ("null" :: Dagger.JSON!))
             .withArg("version", typeDef.withKind(TypeDefKind.STRING_KIND), description: "zizmor image tag (only used when ctr is not provided).", defaultValue: ("\"1.25.2\"" :: Dagger.JSON!))
         ),

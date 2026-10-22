@@ -20,7 +20,7 @@ so the subsequent `uv sync` populates that relocatable environment:
 
 ```python
 b = (
-    uv(source=src)
+    uv(ws)
     .workspace(".")
     .build(package=["my-app"], no_editable=True)
     .with_venv(relocatable=True)  # uv venv --relocatable
@@ -51,7 +51,7 @@ paths the venv expects:
 
     ```python
     runner = (
-        uv(source=src)
+        uv(ws)
         .workspace(".")
         .build(package=["my-app"], no_editable=True)
         .with_venv(relocatable=True)

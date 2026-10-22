@@ -16,7 +16,7 @@ from uv.utils import (
     parse_required_version_from_uv_toml,
     require_package_selection,
     resolve_specifier,
-    workspace_path,
+    root_relative,
 )
 from uv.workspace.index import UvIndex, merge_indices
 
@@ -73,14 +73,6 @@ class TestParseProjectName:
         assert parse_project_name("[tool.uv.workspace]\nmembers = []\n") is None
 
 
-class TestWorkspacePath:
-    def test_root(self):
-        assert workspace_path("uv.lock") == "."
-
-    def test_nested(self):
-        assert workspace_path("pkgs/app/uv.lock") == "pkgs/app"
-
-
 class TestIsExcluded:
     def test_no_patterns(self):
         assert is_excluded("uv-workspace", []) is False
@@ -96,6 +88,23 @@ class TestIsExcluded:
 
     def test_any_of_several(self):
         assert is_excluded("a/b", ["x/*", "a/*"]) is True
+
+
+class TestRootRelative:
+    def test_root_cwd(self):
+        assert root_relative("/", ".") == "."
+
+    def test_root_cwd_child(self):
+        assert root_relative("/", "a/b") == "a/b"
+
+    def test_subdir_cwd(self):
+        assert root_relative("/uv", ".") == "uv"
+
+    def test_subdir_cwd_sibling(self):
+        assert root_relative("/uv", "../deptry") == "deptry"
+
+    def test_subdir_cwd_parent(self):
+        assert root_relative("/uv/tests", "..") == "uv"
 
 
 class TestIsExactVersion:

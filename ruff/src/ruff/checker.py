@@ -4,8 +4,6 @@ from typing import Annotated
 from dagger import Doc, check, field, function, object_type
 from dagger_clients.core import Changeset, Container, Directory, ReturnType, core
 
-from ruff.args import SourceDir
-
 
 @object_type
 class RuffChecker:
@@ -16,14 +14,18 @@ class RuffChecker:
         Doc("Container with ruff installed."),
     ] = field()
 
-    def _container(self, source: Directory) -> Container:
-        return self.ctr.with_workdir("/work").with_mounted_directory("/work", source)
+    source: Annotated[
+        Directory,
+        Doc("Source tree to run on."),
+    ] = field()
+
+    def _container(self) -> Container:
+        return self.ctr.with_workdir("/work").with_mounted_directory("/work", self.source)
 
     @check
     @function
     async def lint(
         self,
-        source: SourceDir,
         extra_args: Annotated[
             list[str] | None,
             Doc("Additional arguments to pass to `ruff check`."),
@@ -37,12 +39,11 @@ class RuffChecker:
         if extra_args:
             args.extend(extra_args)
         args.append(".")
-        await self._container(source).with_exec(args).sync()
+        await self._container().with_exec(args).sync()
 
     @function
     async def fix(
         self,
-        source: SourceDir,
         extra_args: Annotated[
             list[str] | None,
             Doc("Additional arguments to pass to `ruff check --fix`."),
@@ -53,7 +54,7 @@ class RuffChecker:
         if extra_args:
             args.extend(extra_args)
         args.append(".")
-        ctr = self._container(source)
+        ctr = self._container()
         result = ctr.with_exec(args, expect=ReturnType.ANY)
         output = await result.combined_output()
         if output.strip():
@@ -65,7 +66,7 @@ class RuffChecker:
                 "ruff reported an error (configuration, usage, or runtime). "
                 "See stderr above for ruff's output."
             )
-        before = core().directory().with_directory(".", source)
+        before = core().directory().with_directory(".", self.source)
         fixed = result.directory("/work").without_directory(".ruff_cache")
         after = core().directory().with_directory(".", fixed)
         return after.changes(before)
