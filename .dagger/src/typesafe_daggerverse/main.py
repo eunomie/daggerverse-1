@@ -984,6 +984,7 @@ print("LAYER_CACHE_OK")
             tg.start_soon(self.pyproject_pytest_self)
             tg.start_soon(self.pyproject_discovers_projects_and_workspaces)
             tg.start_soon(self.pyproject_workspace_markers)
+            tg.start_soon(self.pyproject_respects_gitignore)
             tg.start_soon(self.pyproject_project_source)
             tg.start_soon(self.pyproject_workspace_source_and_manifests)
 
@@ -1029,6 +1030,26 @@ print("LAYER_CACHE_OK")
         x = found.workspaces().get("tools/x")
         self._assert_equal(await x.lockfiles(), ["pylock.prod.toml"])
         self._assert_equal(await x.members(), ["tools/x"])
+
+    @function
+    async def pyproject_respects_gitignore(self) -> None:
+        """A gitignored copy of the repository (e.g. an agent worktree) adds no projects or workspaces.
+
+        `Workspace.find_roots` walks gitignored directories, so discovery has to
+        filter what it finds through the `.gitignore` files itself.
+        """
+        tree = (
+            self._pyproject_tree()
+            .with_new_file(".gitignore", ".claude/worktrees/\n")
+            .with_new_file(".claude/worktrees/wt1/pyproject.toml", '[project]\nname = "root"\nversion = "0"\n')
+            .with_new_file(".claude/worktrees/wt1/uv.lock", "")
+        )
+        found = pyproject(tree.as_workspace(), exclude=["**/tests/_packages/**"])
+        self._assert_equal(
+            await found.projects().keys(),
+            [".", "packages/a", "packages/b", "packages/b/tests/fixture", "tools/x", "vendor/shared"],
+        )
+        self._assert_equal(await found.workspaces().keys(), ["."])
 
     @function
     async def pyproject_project_source(self) -> None:

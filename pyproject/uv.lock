@@ -635,6 +635,7 @@ source = { editable = "." }
 dependencies = [
     { name = "dagger-clients-core" },
     { name = "dagger-io" },
+    { name = "pathspec" },
 ]
 
 [package.dev-dependencies]
@@ -650,6 +651,7 @@ docs = [
 requires-dist = [
     { name = "dagger-clients-core", editable = "clients/core" },
     { name = "dagger-io", editable = "sdk" },
+    { name = "pathspec", specifier = ">=0.12.1" },
 ]
 
 [package.metadata.requires-dev]

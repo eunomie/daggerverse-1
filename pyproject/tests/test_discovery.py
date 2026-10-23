@@ -1,5 +1,5 @@
 import pytest
-from pyproject.discovery import SOURCE_EXCLUDE, Discovery, Manifest, matches, root_relative, topmost
+from pyproject.discovery import SOURCE_EXCLUDE, Discovery, Gitignore, Manifest, matches, root_relative, topmost
 
 PROJECT = '[project]\nname = "{name}"\nversion = "0"\n'
 
@@ -37,6 +37,26 @@ class TestHelpers:
 
     def test_topmost(self):
         assert topmost(["a/b", "a", "c/d", "c/d/e", "a"]) == ["a", "c/d"]
+
+
+class TestGitignore:
+    def test_directory_pattern_ignores_what_is_below(self):
+        ignored = Gitignore({".": ".claude/worktrees/\n"})
+        assert ignored.ignores(".claude/worktrees/wt1/pyproject.toml")
+        assert not ignored.ignores("pyproject.toml")
+
+    def test_nested_file_applies_below_its_directory_only(self):
+        ignored = Gitignore({"sub": "vendored/\n"})
+        assert ignored.ignores("sub/vendored/pyproject.toml")
+        assert not ignored.ignores("vendored/pyproject.toml")
+
+    def test_negation(self):
+        ignored = Gitignore({".": "*.lock\n!uv.lock\n"})
+        assert ignored.ignores("x/poetry.lock")
+        assert not ignored.ignores("x/uv.lock")
+
+    def test_no_files(self):
+        assert not Gitignore({}).ignores("a/pyproject.toml")
 
 
 class TestManifest:

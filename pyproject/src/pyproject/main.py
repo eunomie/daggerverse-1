@@ -192,19 +192,23 @@ class Pyproject:
         patterns = exclude or []
         cwd = await ws.cwd()
 
-        # Discovery walks the workspace on the host; only manifests are read.
+        # Discovery walks the workspace on the host; only manifests and .gitignore files are read.
         async def roots(markers: list[str]) -> list[str]:
             found = await ws.find_roots(markers, start="/", exclude=SOURCE_EXCLUDE)
             return sorted({root_relative(cwd, root) for root in found})
 
-        project_paths, *marked = await asyncio.gather(
-            roots(["pyproject.toml"]), *(roots([marker]) for marker in workspace_markers)
+        ignore_dirs, project_paths, *marked = await asyncio.gather(
+            roots([".gitignore"]), roots(["pyproject.toml"]), *(roots([marker]) for marker in workspace_markers)
         )
+        ignore_texts = await asyncio.gather(*(ws.file("/" + join(d, ".gitignore")).contents() for d in ignore_dirs))
+        ignored = discovery.Gitignore(dict(zip(ignore_dirs, ignore_texts, strict=True)))
+        project_paths = [p for p in project_paths if not ignored.ignores(join(p, "pyproject.toml"))]
         texts = await asyncio.gather(*(ws.file("/" + join(p, "pyproject.toml")).contents() for p in project_paths))
         lockfiles: dict[str, list[str]] = {}
         for marker, paths in zip(workspace_markers, marked, strict=True):
             for path in paths:
-                lockfiles.setdefault(path, []).append(marker)
+                if not ignored.ignores(join(path, marker)):
+                    lockfiles.setdefault(path, []).append(marker)
 
         found = discovery.Discovery(dict(zip(project_paths, texts, strict=True)), lockfiles)
         projects = {}

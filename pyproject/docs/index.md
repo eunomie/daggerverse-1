@@ -82,7 +82,8 @@ lockfile.
 
 ## How sources are scoped
 
-Every file belongs to the deepest project containing it. A `source` load
+Discovery skips gitignored directories, so a gitignored copy of the repository
+(such as an agent's worktree) adds no projects. Every file belongs to the deepest project containing it. A `source` load
 includes the project trees it needs and leaves out any other project nested
 inside them. A monorepo root's source carries only the root's own files, and
 a workspace's source leaves out test fixtures nested in a member. Caches,

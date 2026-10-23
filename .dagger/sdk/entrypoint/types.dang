@@ -93,6 +93,10 @@ type ModuleTypes {
             .withDescription("Run the pyproject module's own pytest suite (the discovery logic, engine-free).")
         )
         .withFunction(
+          function("pyproject_respects_gitignore", typeDef.withOptional(true).withKind(TypeDefKind.VOID_KIND))
+            .withDescription("A gitignored copy of the repository (e.g. an agent worktree) adds no projects or workspaces.\n\n`Workspace.find_roots` walks gitignored directories, so discovery has to\nfilter what it finds through the `.gitignore` files itself.")
+        )
+        .withFunction(
           function("pyproject_workspace_markers", typeDef.withOptional(true).withKind(TypeDefKind.VOID_KIND))
             .withDescription("`workspace_markers` decides which files make a directory a workspace.")
         )
