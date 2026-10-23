@@ -9,6 +9,7 @@ from dagger.telemetry import get_tracer
 from dagger_clients.core import Changeset, Check, Container, Directory, Secret, Service, Workspace, core
 from dagger_clients.deptry import deptry
 from dagger_clients.github import github
+from dagger_clients.pyproject import pyproject
 from dagger_clients.ruff import ruff
 from dagger_clients.twingate import twingate
 from dagger_clients.uv import uv
@@ -935,6 +936,160 @@ print("LAYER_CACHE_OK")
             absent=[],
         )
         await ctr.with_exec(["python", "-c", script]).stdout()
+
+    # ---- pyproject module checks ----
+
+    @staticmethod
+    def _pyproject_tree() -> Directory:
+        """A uv workspace with a workspace source, an inherited path source and unrelated nested projects."""
+
+        def manifest(name: str, extra: str = "") -> str:
+            return f'[project]\nname = "{name}"\nversion = "0"\n{extra}'
+
+        return (
+            core()
+            .directory()
+            .with_new_file(
+                "pyproject.toml",
+                manifest(
+                    "root",
+                    '[tool.uv.workspace]\nmembers = ["packages/*"]\n'
+                    '[tool.uv.sources]\nshared = { path = "vendor/shared" }\n',
+                ),
+            )
+            .with_new_file("uv.lock", "")
+            .with_new_file(
+                "packages/a/pyproject.toml",
+                manifest("a", 'dependencies = ["b", "shared"]\n[tool.uv.sources]\nb = { workspace = true }\n'),
+            )
+            .with_new_file("packages/a/src/a/__init__.py", "")
+            .with_new_file("packages/b/pyproject.toml", manifest("b"))
+            .with_new_file("packages/b/src/b/__init__.py", "")
+            .with_new_file("packages/b/tests/fixture/pyproject.toml", manifest("fixture"))
+            .with_new_file("vendor/shared/pyproject.toml", manifest("shared"))
+            .with_new_file("vendor/shared/shared.py", "")
+            .with_new_file("tools/x/pyproject.toml", manifest("x"))
+            .with_new_file("tools/x/pylock.prod.toml", "")
+            .with_new_file("tests/_packages/f/pyproject.toml", manifest("f"))
+            .with_new_file("tests/_packages/f/uv.lock", "")
+        )
+
+    @staticmethod
+    def _assert_equal(actual: object, expected: object) -> None:
+        if actual != expected:
+            raise AssertionError(f"expected {expected!r}, got {actual!r}")
+
+    @check
+    @function
+    async def all_pyproject(self) -> None:
+        """Run all checks for the `pyproject` module in parallel."""
+        async with anyio.create_task_group() as tg:
+            tg.start_soon(self.pyproject_pytest_self)
+            tg.start_soon(self.pyproject_discovers_projects_and_workspaces)
+            tg.start_soon(self.pyproject_workspace_markers)
+            tg.start_soon(self.pyproject_respects_gitignore)
+            tg.start_soon(self.pyproject_project_source)
+            tg.start_soon(self.pyproject_workspace_source_and_manifests)
+
+    @function
+    async def pyproject_pytest_self(self) -> None:
+        """Run the pyproject module's own pytest suite (the discovery logic, engine-free)."""
+        ctr = (
+            await uv(_fixture("pyproject"))
+            .workspace(".")
+            .install(package=["pyproject"], base_container=_base(), all_groups=True)
+        )
+        workdir = await ctr.workdir()
+        ctr = ctr.with_directory(f"{workdir}/tests", _src("pyproject/tests"))
+        await _with_pytest_otel(ctr).with_exec(["pytest", "-q"]).stdout()
+
+    @function
+    async def pyproject_discovers_projects_and_workspaces(self) -> None:
+        """Every pyproject.toml is a project and every uv.lock a workspace, less `exclude`."""
+        found = pyproject(self._pyproject_tree().as_workspace(), exclude=["**/tests/_packages/**"])
+        self._assert_equal(
+            await found.projects().keys(),
+            [".", "packages/a", "packages/b", "packages/b/tests/fixture", "tools/x", "vendor/shared"],
+        )
+        self._assert_equal(await found.workspaces().keys(), ["."])
+        root = found.workspaces().get(".")
+        self._assert_equal(await root.members(), [".", "packages/a", "packages/b"])
+        self._assert_equal(await root.local_dependencies(), ["vendor/shared"])
+        self._assert_equal(await root.projects().keys(), [".", "packages/a", "packages/b"])
+        a = found.projects().get("packages/a")
+        self._assert_equal(await a.workspace(), ".")
+        self._assert_equal(await a.local_dependencies(), ["packages/b", "vendor/shared"])
+        self._assert_equal(await found.projects().get("tools/x").workspace(), None)
+
+    @function
+    async def pyproject_workspace_markers(self) -> None:
+        """`workspace_markers` decides which files make a directory a workspace."""
+        found = pyproject(
+            self._pyproject_tree().as_workspace(),
+            exclude=["**/tests/_packages/**"],
+            workspace_markers=["uv.lock", "pylock.prod.toml"],
+        )
+        self._assert_equal(await found.workspaces().keys(), [".", "tools/x"])
+        x = found.workspaces().get("tools/x")
+        self._assert_equal(await x.lockfiles(), ["pylock.prod.toml"])
+        self._assert_equal(await x.members(), ["tools/x"])
+
+    @function
+    async def pyproject_respects_gitignore(self) -> None:
+        """A gitignored copy of the repository (e.g. an agent worktree) adds no projects or workspaces.
+
+        `Workspace.find_roots` walks gitignored directories, so discovery has to
+        filter what it finds through the `.gitignore` files itself.
+        """
+        tree = (
+            self._pyproject_tree()
+            .with_new_file(".gitignore", ".claude/worktrees/\n")
+            .with_new_file(".claude/worktrees/wt1/pyproject.toml", '[project]\nname = "root"\nversion = "0"\n')
+            .with_new_file(".claude/worktrees/wt1/uv.lock", "")
+        )
+        found = pyproject(tree.as_workspace(), exclude=["**/tests/_packages/**"])
+        self._assert_equal(
+            await found.projects().keys(),
+            [".", "packages/a", "packages/b", "packages/b/tests/fixture", "tools/x", "vendor/shared"],
+        )
+        self._assert_equal(await found.workspaces().keys(), ["."])
+
+    @function
+    async def pyproject_project_source(self) -> None:
+        """A project's source holds its own files and its local dependencies', and nothing else."""
+        ws = self._pyproject_tree().as_workspace()
+        source = pyproject(ws).projects().get("packages/a").source(ws)
+        self._assert_equal(
+            sorted(await source.glob("**/*.py")),
+            ["packages/a/src/a/__init__.py", "packages/b/src/b/__init__.py", "vendor/shared/shared.py"],
+        )
+        self._assert_equal(await source.glob("packages/b/tests/**"), [])
+
+    @function
+    async def pyproject_workspace_source_and_manifests(self) -> None:
+        """A workspace's source leaves out unrelated nested projects; its manifests hold only resolver inputs."""
+        ws = self._pyproject_tree().as_workspace()
+        root = pyproject(ws).workspaces().get(".")
+        self._assert_equal(
+            sorted(await root.source(ws).glob("**/pyproject.toml")),
+            [
+                "packages/a/pyproject.toml",
+                "packages/b/pyproject.toml",
+                "pyproject.toml",
+                "vendor/shared/pyproject.toml",
+            ],
+        )
+        manifests = await root.manifests(ws).glob("**/*.*")
+        self._assert_equal(
+            sorted(manifests),
+            [
+                "packages/a/pyproject.toml",
+                "packages/b/pyproject.toml",
+                "pyproject.toml",
+                "uv.lock",
+                "vendor/shared/pyproject.toml",
+            ],
+        )
 
     # ---- deptry module checks ----
 

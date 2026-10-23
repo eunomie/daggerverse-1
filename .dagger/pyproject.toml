@@ -2,7 +2,7 @@
 name = "typesafe-daggerverse"
 version = "0.1.0"
 requires-python = ">=3.13"
-dependencies = ["dagger-io", "anyio", "dagger-clients-core", "dagger-clients-github", "dagger-clients-deptry", "dagger-clients-pytest", "dagger-clients-twingate", "dagger-clients-ruff", "dagger-clients-uv", "dagger-clients-zizmor"]
+dependencies = ["dagger-io", "anyio", "dagger-clients-core", "dagger-clients-github", "dagger-clients-deptry", "dagger-clients-pytest", "dagger-clients-twingate", "dagger-clients-ruff", "dagger-clients-uv", "dagger-clients-zizmor", "dagger-clients-pyproject"]
 
 [build-system]
 requires = ["uv_build>=0.8.4,<0.9.0"]
@@ -18,6 +18,7 @@ dagger-clients-twingate = { workspace = true }
 dagger-clients-ruff = { workspace = true }
 dagger-clients-uv = { workspace = true }
 dagger-clients-zizmor = { workspace = true }
+dagger-clients-pyproject = { workspace = true }
 
 # Map distributions to the import packages they ship, so deptry doesn't flag
 # those imports as missing/unused: `dagger-io` ships `dagger`, and the
@@ -32,6 +33,7 @@ dagger-clients-twingate = "dagger_clients"
 dagger-clients-ruff = "dagger_clients"
 dagger-clients-uv = "dagger_clients"
 dagger-clients-zizmor = "dagger_clients"
+dagger-clients-pyproject = "dagger_clients"
 
 [tool.uv.workspace]
-members = ["sdk", "clients/core", "clients/github", "clients/deptry", "clients/pytest", "clients/twingate", "clients/ruff", "clients/uv", "clients/zizmor"]
+members = ["sdk", "clients/core", "clients/github", "clients/deptry", "clients/pytest", "clients/twingate", "clients/ruff", "clients/uv", "clients/zizmor", "clients/pyproject"]

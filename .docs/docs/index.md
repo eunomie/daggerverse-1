@@ -16,6 +16,16 @@
 
     [:octicons-book-16: Docs](./uv/) · [:octicons-package-16: SDK](https://daggerverse.dev/mod/github.com/typesafe-ai/daggerverse/uv) · [:octicons-mark-github-16: Source](https://github.com/typesafe-ai/daggerverse/tree/main/uv)
 
+-   :octicons-file-directory-16:{ .lg .middle } __pyproject__
+
+    ---
+
+    Discover the Python projects and workspaces in a Dagger workspace, each with exactly the source it needs.
+
+    ---
+
+    [:octicons-book-16: Docs](./pyproject/) · [:octicons-package-16: SDK](https://daggerverse.dev/mod/github.com/typesafe-ai/daggerverse/pyproject) · [:octicons-mark-github-16: Source](https://github.com/typesafe-ai/daggerverse/tree/main/pyproject)
+
 -   ![ruff](assets/logos/ruff.svg){ .lg .middle style="width: 40px; height: 40px" } __ruff__
 
     ---
