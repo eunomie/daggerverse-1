@@ -5,10 +5,9 @@ import warnings as _warnings  # noqa: F401
 from collections.abc import Callable as _Callable
 from dataclasses import dataclass as _dataclass
 from typing import Protocol as _Protocol
+from typing import Self as _Self
 from typing import overload as _overload
 from typing import runtime_checkable as _runtime_checkable
-
-from typing_extensions import Self as _Self
 
 from dagger.client import Session as _Session
 from dagger.client import Target as _Target
@@ -75,25 +74,6 @@ class Deptry(_Type):
         _ctx = self._select("id", _args)
         return await _ctx.execute(str)
 
-    async def project_paths(self) -> list[str]:
-        """Returns
-        -------
-        list[str]
-            The `String` scalar type represents textual data, represented as
-            UTF-8 character sequences. The String type is most often used by
-            GraphQL to represent free-form human-readable text.
-
-        Raises
-        ------
-        ExecuteTimeoutError
-            If the time to execute the query exceeds the configured timeout.
-        QueryError
-            If the API returns an error.
-        """
-        _args: list[_Arg] = []
-        _ctx = self._select("projectPaths", _args)
-        return await _ctx.execute(list[str])
-
     def projects(self) -> "DeptryProjects":
         """
         Every Python project deptry checks in the source tree.
@@ -106,17 +86,15 @@ class Deptry(_Type):
 class DeptryProject(_Type):
     """ One Python project that deptry checks.  """
 
-    def check(self, ws: Workspace, *, version: str = '0.25.1', ctr: Container | None = None, args: list[str] | None = None,) -> Check:
+    def check(self, *, version: str = '0.25.1', ctr: Container | None = None, args: list[str] | None = None,) -> Check:
         """
         Run `deptry .` in this project and fail on any dependency issue.
 
-        Only this project's directory is loaded from the workspace.
+        Only the files this project owns are loaded: its directory less the
+        projects nested in it, such as generated Dagger code or test fixtures.
 
         Parameters
         ----------
-        ws:
-            A Dagger workspace detected from the current working directory or
-            constructed from a Directory.
         version:
             deptry version to use (ignored when `ctr` is set).
         ctr:
@@ -127,8 +105,6 @@ class DeptryProject(_Type):
             Additional arguments to pass to deptry (added before the project
             root).
         """
-        if not (isinstance(ws, Workspace)):
-            raise _type_error("DeptryProject.check", "ws", ws, "Workspace")
         if not (isinstance(version, str)):
             raise _type_error("DeptryProject.check", "version", version, "str")
         if not (ctr is None or isinstance(ctr, Container)):
@@ -136,7 +112,6 @@ class DeptryProject(_Type):
         if not (args is None or (isinstance(args, list) and all(isinstance(_v0, str) for _v0 in args))):
             raise _type_error("DeptryProject.check", "args", args, "list[str] | None")
         _args = [
-            _Arg("ws", ws),
             _Arg("version", version, '0.25.1'),
             _Arg("ctr", ctr, None),
             _Arg("args", args, None),
@@ -285,18 +260,15 @@ class DeptryProjects(_Type):
 
 def deptry(ws: Workspace, *, exclude: list[str] | None = None, session: _Session | None = None,) -> Deptry:
     """
-    Discover the projects: one per `pyproject.toml` that declares
-    dependencies
-    (see `_project_info`) and either has its own package source or
-    declares a
-    `[tool.deptry]` section. A project with no package of its own (e.g. a
-    uv
-    workspace root that only aggregates members in subdirectories) is left
-    out, so `deptry .` never spills over the rest of the monorepo, unless
-    its
-    `[tool.deptry]` section opts it in explicitly. Paths matching
-    `exclude` are
-    left out too.
+    Discover the projects: one per `pyproject.toml` the `pyproject` module
+    finds, other than Dagger-generated ones, that declares dependencies
+    (see `_project_info`) and either has its
+    own package source or declares a `[tool.deptry]` section. A project
+    with
+    no package of its own (e.g. a uv workspace root that only aggregates
+    members in subdirectories) is left out, unless its `[tool.deptry]`
+    section opts it in explicitly. Paths matching `exclude` are left out
+    too.
 
     The workspace is walked on the host, and only the pyproject.toml files
     are loaded.

@@ -229,12 +229,11 @@ class TypesafeDaggerverse:
     @staticmethod
     async def _uv_audit_all(src: Directory, subset: list[str] | None = None) -> None:
         """Audit every workspace in `src` (or the `subset` of them), as `dagger check` does."""
-        ws = src.as_workspace()
-        workspaces = uv(ws).workspaces()
+        workspaces = uv(src.as_workspace()).workspaces()
         if subset is not None:
             workspaces = workspaces.subset(subset)
         for workspace in await workspaces.list_():
-            await _run_check(workspace.audit(ws))
+            await _run_check(workspace.audit())
 
     @check
     @function
@@ -989,6 +988,7 @@ print("LAYER_CACHE_OK")
             tg.start_soon(self.pyproject_workspace_markers)
             tg.start_soon(self.pyproject_respects_gitignore)
             tg.start_soon(self.pyproject_project_source)
+            tg.start_soon(self.pyproject_project_files)
             tg.start_soon(self.pyproject_workspace_source_and_manifests)
 
     @function
@@ -1066,6 +1066,18 @@ print("LAYER_CACHE_OK")
         self._assert_equal(await source.glob("packages/b/tests/**"), [])
 
     @function
+    async def pyproject_project_files(self) -> None:
+        """A project's files stop at the projects nested in it, needed or not."""
+        ws = self._pyproject_tree().as_workspace()
+        files = pyproject(ws).projects().get("packages/b").files(ws)
+        self._assert_equal(
+            sorted(await files.glob("**/*.toml")),
+            ["packages/b/pyproject.toml"],
+        )
+        root = pyproject(ws).projects().get(".").files(ws)
+        self._assert_equal(sorted(await root.glob("**/pyproject.toml")), ["pyproject.toml"])
+
+    @function
     async def pyproject_workspace_source_and_manifests(self) -> None:
         """A workspace's source leaves out unrelated nested projects; its manifests hold only resolver inputs."""
         ws = self._pyproject_tree().as_workspace()
@@ -1102,12 +1114,11 @@ print("LAYER_CACHE_OK")
     @staticmethod
     async def _deptry_check_all(src: Directory, subset: list[str] | None = None) -> None:
         """Run deptry on every project in `src` (or the `subset` of them), as `dagger check` does."""
-        ws = src.as_workspace()
-        projects = deptry(ws).projects()
+        projects = deptry(src.as_workspace()).projects()
         if subset is not None:
             projects = projects.subset(subset)
         for project in await projects.list_():
-            await _run_check(project.check(ws))
+            await _run_check(project.check())
 
     @check
     @function
@@ -1127,7 +1138,8 @@ print("LAYER_CACHE_OK")
     async def deptry_discovers_projects(self) -> None:
         """`projects` finds one entry per pyproject.toml that declares dependencies.
 
-        A tooling-only pyproject (no `[project].dependencies`) is left out.
+        A tooling-only pyproject (no `[project].dependencies`) and a
+        Dagger-generated one (`[tool.dagger] generated`) are left out.
         """
         pyproject = '[project]\nname = "x"\nversion = "0"\ndependencies = []\n'
         src = (
@@ -1138,6 +1150,8 @@ print("LAYER_CACHE_OK")
             .with_new_file("b/c/pyproject.toml", pyproject)
             .with_new_file("b/c/x/__init__.py", "")
             .with_new_file("tool/pyproject.toml", "[tool.ruff]\nline-length = 100\n")
+            .with_new_file("a/sdk/pyproject.toml", pyproject + '[tool.dagger]\ngenerated = "runtime"\n')
+            .with_new_file("a/sdk/src/x/__init__.py", "")
         )
         projects = await deptry(src.as_workspace()).projects().keys()
         if projects != ["a", "b/c"]:

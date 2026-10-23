@@ -5,7 +5,7 @@ from dagger import Doc, collection, field, function, get, keys, object_type
 from dagger_clients.core import Directory, File, Workspace
 
 from pyproject import discovery
-from pyproject.discovery import DEFAULT_WORKSPACE_MARKERS, SOURCE_EXCLUDE, join, matches, root_relative
+from pyproject.discovery import DEFAULT_WORKSPACE_MARKERS, SOURCE_EXCLUDE, join, matches, root_relative, tree
 
 ProjectPath = Annotated[
     str, Doc("Project root (holding pyproject.toml), relative to the workspace root. `.` for the root.")
@@ -23,6 +23,12 @@ class PyprojectProject:
 
     path: Annotated[str, Doc("Project root, relative to the workspace root. `.` for the root.")] = field()
     name: Annotated[str | None, Doc("`[project].name`, or null for a project without one.")] = field()
+    generated: Annotated[
+        bool,
+        Doc(
+            "Whether Dagger generated this project (`[tool.dagger] generated`), such as a module's `sdk/` or `clients/*`."
+        ),
+    ] = field()
     workspace: Annotated[
         str | None,
         Doc("Root of the workspace that installs this project as a member, or null when none does."),
@@ -46,6 +52,7 @@ class PyprojectProject:
         return cls(
             path=project.path,
             name=project.name,
+            generated=project.generated,
             workspace=project.workspace,
             nested=list(project.nested),
             local_dependencies=list(project.local_dependencies),
@@ -57,6 +64,17 @@ class PyprojectProject:
     def pyproject(self, ws: Workspace) -> File:
         """This project's `pyproject.toml`."""
         return ws.file("/" + join(self.path, "pyproject.toml"))
+
+    @function
+    def files(self, ws: Workspace) -> Directory:
+        """The files this project owns, at their workspace-root-relative paths.
+
+        Its tree less the projects nested in it, caches, virtualenvs, build
+        output and gitignored files. This is what a tool that works on one
+        project's own code, such as a linter, should see.
+        """
+        exclude = [*SOURCE_EXCLUDE, *(pattern for nested in self.nested for pattern in tree(nested))]
+        return ws.directory("/", include=tree(self.path), exclude=exclude, gitignore=True)
 
     @function
     def source(self, ws: Workspace) -> Directory:

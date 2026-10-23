@@ -4,7 +4,6 @@ from uv.utils import (
     format_audit_failure,
     image_ref,
     is_exact_version,
-    is_excluded,
     minimal_compatible_version,
     normalize_exact_version,
     parse_indices,
@@ -14,7 +13,6 @@ from uv.utils import (
     parse_required_version_from_uv_toml,
     require_package_selection,
     resolve_specifier,
-    root_relative,
 )
 from uv.workspace.index import UvIndex, merge_indices
 
@@ -62,40 +60,6 @@ class TestParseProjectName:
 
     def test_missing_project(self):
         assert parse_project_name("[tool.uv.workspace]\nmembers = []\n") is None
-
-
-class TestIsExcluded:
-    def test_no_patterns(self):
-        assert is_excluded("uv-workspace", []) is False
-
-    def test_exact_match(self):
-        assert is_excluded(".dagger", [".dagger"]) is True
-
-    def test_globstar_match(self):
-        assert is_excluded("uv-workspace/tests/_packages/app", ["**/tests/_packages/**"]) is True
-
-    def test_no_match(self):
-        assert is_excluded("uv-workspace", ["**/tests/**"]) is False
-
-    def test_any_of_several(self):
-        assert is_excluded("a/b", ["x/*", "a/*"]) is True
-
-
-class TestRootRelative:
-    def test_root_cwd(self):
-        assert root_relative("/", ".") == "."
-
-    def test_root_cwd_child(self):
-        assert root_relative("/", "a/b") == "a/b"
-
-    def test_subdir_cwd(self):
-        assert root_relative("/uv", ".") == "uv"
-
-    def test_subdir_cwd_sibling(self):
-        assert root_relative("/uv", "../deptry") == "deptry"
-
-    def test_subdir_cwd_parent(self):
-        assert root_relative("/uv/tests", "..") == "uv"
 
 
 class TestIsExactVersion:

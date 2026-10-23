@@ -9,6 +9,8 @@ description: Audit the locked dependencies of every uv workspace in a source tre
 `audit` runs `uv audit --frozen` against a workspace's `uv.lock` and reports known
 vulnerabilities. It reads the lockfile as committed, without re-resolving against
 package indexes, so it needs no index credentials.
+It mounts only the lockfile, `uv.toml` and the members' `pyproject.toml` files, so a
+source edit doesn't re-run it.
 
 ## Auditing a whole source tree
 
@@ -53,5 +55,5 @@ Select one workspace by its path (see
 === "Python SDK"
 
     ```python
-    await uv(ws).workspace("services/api").audit(ws).pass_()
+    await uv(ws).workspace("services/api").audit().pass_()
     ```

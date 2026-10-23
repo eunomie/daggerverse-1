@@ -1,14 +1,16 @@
 from __future__ import annotations
 
+import asyncio
 import posixpath
 import re
 import tomllib
-from pathlib import Path, PurePosixPath
+from pathlib import Path
 from typing import Annotated
 
 import dagger
 from dagger import Doc, check, collection, field, function, get, keys, object_type
-from dagger_clients.core import Container, Workspace, core
+from dagger_clients.core import Container, Directory, Workspace, core
+from dagger_clients.pyproject import pyproject
 
 _DEFAULT_VERSION = "0.25.1"
 
@@ -27,41 +29,8 @@ def pinned_image(name: str) -> str:
 _BASE_IMAGE = pinned_image("uv")
 
 
-# Never part of a project deptry scans: caches, virtualenvs, build output and
-# generated Dagger code.
-_EXCLUDE = [
-    "**/__pycache__",
-    "**/*.pyc",
-    "**/node_modules",
-    "**/.venv",
-    "**/.tox",
-    "**/.nox",
-    "**/.git",
-    "**/.mypy_cache",
-    "**/.pytest_cache",
-    "**/.ruff_cache",
-    "**/.direnv",
-    "**/.devenv",
-    "**/dist",
-    "**/build",
-    "**/*.egg-info",
-    "**/sdk",
-    "**/clients",
-]
-
-
-def _root_relative(cwd: str, path: str) -> str:
-    """A workspace-root-relative path for `path`, which is relative to the workspace `cwd`."""
-    return posixpath.normpath(posixpath.join(cwd.lstrip("/"), path))
-
-
 def _root_path(path: str, *names: str) -> str:
     return "/" + posixpath.normpath(posixpath.join(path, *names))
-
-
-def _is_excluded(path: str, patterns: list[str]) -> bool:
-    project = PurePosixPath(path)
-    return any(project.full_match(pattern) for pattern in patterns)
 
 
 def _to_module_name(name: str) -> str:
@@ -158,11 +127,13 @@ class DeptryProject:
         Doc("Project path, relative to the workspace root. `.` for the root."),
     ] = field()
 
+    module: str | None
+    files: Directory
+
     @check
     @function
     async def check(
         self,
-        ws: Workspace,
         version: Annotated[
             str,
             Doc("deptry version to use (ignored when `ctr` is set)."),
@@ -182,12 +153,12 @@ class DeptryProject:
     ) -> None:
         """Run `deptry .` in this project and fail on any dependency issue.
 
-        Only this project's directory is loaded from the workspace.
+        Only the files this project owns are loaded: its directory less the
+        projects nested in it, such as generated Dagger code or test fixtures.
         """
-        project_dir = ws.directory(_root_path(self.path), exclude=_EXCLUDE, gitignore=True)
-        _, module, _ = _project_info(await project_dir.file("pyproject.toml").contents())
         container = ctr if ctr is not None else _container(version)
-        known = ["--known-first-party", module] if module else []
+        known = ["--known-first-party", self.module] if self.module else []
+        project_dir = self.files if self.path == "." else self.files.directory(self.path)
         try:
             await (
                 # `FORCE_COLOR` makes deptry colorize its report even though its
@@ -218,11 +189,17 @@ class DeptryProjects:
         Doc("Project paths, relative to the workspace root. `.` for the root."),
     ] = keys()
 
+    items: list[DeptryProject]
+
     @function
     @get
     def project(self, path: str) -> DeptryProject:
         """The project at `path`."""
-        return DeptryProject(path=path)
+        for item in self.items:
+            if item.path == path:
+                return item
+        msg = f"deptry checks no project at {path!r}"
+        raise ValueError(msg)
 
 
 def _container(version: str) -> Container:
@@ -250,10 +227,7 @@ class Deptry:
     Learn more about deptry at <https://deptry.com>.
     """
 
-    project_paths: Annotated[
-        list[str],
-        Doc("Paths of the projects deptry checks, relative to the workspace root."),
-    ] = field()
+    items: list[DeptryProject]
 
     @classmethod
     async def create(
@@ -264,31 +238,32 @@ class Deptry:
             Doc("Glob patterns of project paths to leave out of projects, e.g. **/tests/_packages/**."),
         ] = None,
     ) -> Deptry:
-        """Discover the projects: one per `pyproject.toml` that declares dependencies
-        (see `_project_info`) and either has its own package source or declares a
-        `[tool.deptry]` section. A project with no package of its own (e.g. a uv
-        workspace root that only aggregates members in subdirectories) is left
-        out, so `deptry .` never spills over the rest of the monorepo, unless its
-        `[tool.deptry]` section opts it in explicitly. Paths matching `exclude` are
-        left out too.
+        """Discover the projects: one per `pyproject.toml` the `pyproject` module
+        finds, other than Dagger-generated ones, that declares dependencies (see `_project_info`) and either has its
+        own package source or declares a `[tool.deptry]` section. A project with
+        no package of its own (e.g. a uv workspace root that only aggregates
+        members in subdirectories) is left out, unless its `[tool.deptry]`
+        section opts it in explicitly. Paths matching `exclude` are left out too.
 
         The workspace is walked on the host, and only the pyproject.toml files
         are loaded.
         """
-        patterns = exclude or []
-        cwd = await ws.cwd()
-        roots = await ws.find_roots(["pyproject.toml"], start="/", exclude=[*_EXCLUDE, *patterns])
-        paths: list[str] = []
-        for path in sorted({_root_relative(cwd, root) for root in roots}):
-            if _is_excluded(path, patterns):
-                continue
-            pyproject = await ws.file(_root_path(path, "pyproject.toml")).contents()
-            checkable, module, configured = _project_info(pyproject)
+        found = await pyproject(ws, exclude=exclude).projects().list_()
+
+        async def _project(project) -> DeptryProject | None:
+            # Dagger's generated sdk/ and clients/ are projects too, but not ours to check.
+            if await project.generated():
+                return None
+            path = await project.path()
+            checkable, module, configured = _project_info(await project.pyproject(ws).contents())
             if checkable and (configured or await _has_package_layout(ws, path, module)):
-                paths.append(path)
-        return cls(project_paths=paths)
+                return DeptryProject(path=path, module=module, files=project.files(ws))
+            return None
+
+        projects = await asyncio.gather(*(_project(project) for project in found))
+        return cls(items=[project for project in projects if project is not None])
 
     @function
     def projects(self) -> DeptryProjects:
         """Every Python project deptry checks in the source tree."""
-        return DeptryProjects(paths=self.project_paths)
+        return DeptryProjects(paths=[item.path for item in self.items], items=self.items)

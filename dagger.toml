@@ -23,13 +23,14 @@ exclude = ["**/tests/_packages/**"]
 exclude = ["**/tests/_packages/**"]
 
 [modules.python-sdk]
-source = "github.com/dagger/python-sdk"
+source = "github.com/dagger/python-sdk@main"
 
 [sdks.python]
 module = "python-sdk"
 
 [sdks.python.scopes.deptry]
 is-module = true
+clients = ["./pyproject"]
 
 [sdks.python.scopes.github]
 is-module = true
@@ -42,6 +43,7 @@ is-module = true
 
 [sdks.python.scopes.uv]
 is-module = true
+clients = ["./pyproject"]
 
 [sdks.python.scopes.zizmor]
 is-module = true

@@ -51,13 +51,16 @@ $ dagger install github.com/typesafe-ai/daggerverse/pyproject
 |-------|---------|
 | `path` | Project root. |
 | `name` | `[project].name`, or null. |
+| `generated` | Whether Dagger generated this project (`[tool.dagger] generated`), such as a module's `sdk/` or `clients/*`. Tools that check user code should skip it. |
 | `workspace` | Root of the workspace that installs this project as a member, or null. |
 | `nested` | Topmost projects nested inside this one. Their files are their own. |
 | `local_dependencies` | Projects this one depends on through `[tool.uv.sources]` path and workspace sources, transitively, wherever they live. |
 
 `source(ws)` returns the project's own files plus its local dependencies'. Paths
 stay relative to the workspace root, so a path source like `../lib` resolves
-once the directory is mounted as the root. `pyproject(ws)` returns the manifest.
+once the directory is mounted as the root. `files(ws)` returns only the files
+the project owns, its tree less nested projects, for tools such as linters that
+work on one project's own code. `pyproject(ws)` returns the manifest.
 
 ### Workspaces
 

@@ -99,6 +99,11 @@ class TestManifest:
         )
         assert manifest.dependencies == {"my-lib", "tabulate", "pytest", "ruff", "mypy"}
 
+    def test_dagger_generated(self):
+        assert Manifest.parse(".", project("x", '\n[tool.dagger]\ngenerated = "core"\n')).generated
+        assert not Manifest.parse(".", project("x", "\n[tool.dagger]\nother = 1\n")).generated
+        assert not Manifest.parse(".", project("x")).generated
+
     def test_invalid_toml_names_the_file(self):
         with pytest.raises(ValueError, match=r"^a/pyproject.toml: "):
             Manifest.parse("a", "[project\n")

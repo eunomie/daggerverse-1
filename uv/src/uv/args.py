@@ -2,26 +2,6 @@ from typing import Annotated, TypeAlias
 
 from dagger import Doc
 
-# Never part of a uv build's input: caches, virtualenvs and build output.
-SOURCE_EXCLUDE = [
-    "**/__pycache__",
-    "**/*.pyc",
-    "**/node_modules",
-    "**/.venv",
-    "**/.tox",
-    "**/.nox",
-    "**/.git",
-    "**/.mypy_cache",
-    "**/.pytest_cache",
-    "**/.ruff_cache",
-    "**/.direnv",
-    "**/.devenv",
-    "**/dist",
-    "**/build",
-    "**/*.egg-info",
-]
-
-
 WorkspacePath: TypeAlias = Annotated[
     str,
     Doc("Path to the uv workspace root (holding uv.lock and pyproject.toml), relative to the workspace root."),

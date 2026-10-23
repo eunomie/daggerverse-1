@@ -1,11 +1,23 @@
+import asyncio
 from typing import Annotated, Self
 
-from dagger import Doc, collection, field, function, get, keys, object_type
-from dagger_clients.core import Directory, Workspace
+from dagger import Doc, collection, function, get, keys, object_type
+from dagger_clients.core import Workspace
+from dagger_clients.pyproject import pyproject
 
-from uv.args import SOURCE_EXCLUDE, WorkspacePath
-from uv.utils import is_excluded, root_relative
+from uv.args import WorkspacePath
 from uv.workspace import UvWorkspaceSource
+
+# A uv workspace is a directory holding a uv.lock.
+_WORKSPACE_MARKERS = ["uv.lock"]
+
+
+def _lookup(items: list[UvWorkspaceSource], path: str) -> UvWorkspaceSource:
+    for item in items:
+        if item.path == path:
+            return item
+    msg = f"no uv workspace (uv.lock) at {path!r}"
+    raise ValueError(msg)
 
 
 @object_type
@@ -22,36 +34,26 @@ class UvWorkspaces:
         Doc("uv workspace root paths (holding uv.lock), relative to the workspace root. `.` for the root."),
     ] = keys()
 
-    source: Annotated[
-        Directory,
-        Doc("Source tree containing the workspaces."),
-    ] = field()
+    items: list[UvWorkspaceSource]
 
     @function
     @get
     def workspace(self, path: WorkspacePath) -> UvWorkspaceSource:
         """The uv workspace rooted at `path`."""
-        return UvWorkspaceSource(source=self.source, path=path)
+        return _lookup(self.items, path)
 
 
 @object_type
 class Uv:
     """Entrypoint for the `uv` module.
 
-    Hands out one `UvWorkspaceSource` per uv workspace.
+    Hands out one `UvWorkspaceSource` per uv workspace, as the `pyproject`
+    module discovers them.
     Use `workspace` to grab a single workspace by path or `workspaces` to get them all.
 
     Learn more in the [docs](https://daggerverse.docs.typesafe.ai/uv/)."""
 
-    source: Annotated[
-        Directory,
-        Doc("Source tree: the Dagger workspace, less caches, virtualenvs and gitignored files."),
-    ] = field()
-
-    workspace_paths: Annotated[
-        list[str],
-        Doc("Paths of the uv workspaces found in the source tree, relative to its root."),
-    ] = field()
+    items: list[UvWorkspaceSource]
 
     @classmethod
     async def create(
@@ -62,14 +64,13 @@ class Uv:
             Doc("Glob patterns of workspace paths to leave out of workspaces, e.g. **/tests/_packages/**."),
         ] = None,
     ) -> Self:
-        # Discovery walks the workspace on the host, so it loads no files.
-        patterns = exclude or []
-        cwd = await ws.cwd()
-        roots = await ws.find_roots(["uv.lock"], start="/", exclude=[*SOURCE_EXCLUDE, *patterns])
-        paths = sorted({root_relative(cwd, root) for root in roots})
+        found = await pyproject(ws, exclude=exclude, workspace_markers=_WORKSPACE_MARKERS).workspaces().list_()
+        paths = await asyncio.gather(*(workspace.path() for workspace in found))
         return cls(
-            source=ws.directory("/", exclude=SOURCE_EXCLUDE, gitignore=True),
-            workspace_paths=[path for path in paths if not is_excluded(path, patterns)],
+            items=[
+                UvWorkspaceSource(path=path, source=workspace.source(ws), manifests=workspace.manifests(ws))
+                for path, workspace in zip(paths, found, strict=True)
+            ]
         )
 
     @function
@@ -79,9 +80,9 @@ class Uv:
         The returned `UvWorkspaceSource` can `audit` its locked dependencies or
         `build` a minimal container for a package.
         """
-        return UvWorkspaceSource(source=self.source, path=path)
+        return _lookup(self.items, path)
 
     @function
     def workspaces(self) -> UvWorkspaces:
         """Every uv workspace in the source tree (one per uv.lock), less those matching `exclude`."""
-        return UvWorkspaces(paths=self.workspace_paths, source=self.source)
+        return UvWorkspaces(paths=[item.path for item in self.items], items=self.items)

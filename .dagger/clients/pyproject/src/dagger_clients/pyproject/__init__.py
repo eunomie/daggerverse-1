@@ -5,10 +5,9 @@ import warnings as _warnings  # noqa: F401
 from collections.abc import Callable as _Callable
 from dataclasses import dataclass as _dataclass
 from typing import Protocol as _Protocol
+from typing import Self as _Self
 from typing import overload as _overload
 from typing import runtime_checkable as _runtime_checkable
-
-from typing_extensions import Self as _Self
 
 from dagger.client import Session as _Session
 from dagger.client import Target as _Target
@@ -96,6 +95,48 @@ class PyprojectProject(_Type):
     """ A Python project: a directory holding a `pyproject.toml`.  Every
     file belongs to the deepest project containing it, so a project's own
     files stop at the projects nested inside it (`nested`).  """
+
+    def files(self, ws: Workspace) -> Directory:
+        """
+        The files this project owns, at their workspace-root-relative paths.
+
+        Its tree less the projects nested in it, caches, virtualenvs, build
+        output and gitignored files. This is what a tool that works on one
+        project's own code, such as a linter, should see.
+
+        Parameters
+        ----------
+        ws:
+            A Dagger workspace detected from the current working directory or
+            constructed from a Directory.
+        """
+        if not (isinstance(ws, Workspace)):
+            raise _type_error("PyprojectProject.files", "ws", ws, "Workspace")
+        _args = [
+            _Arg("ws", ws),
+        ]
+        _ctx = self._select("files", _args)
+        return Directory(_ctx)
+
+    async def generated(self) -> bool:
+        """Whether Dagger generated this project (`[tool.dagger] generated`),
+        such as a module's `sdk/` or `clients/*`.
+
+        Returns
+        -------
+        bool
+            The `Boolean` scalar type represents `true` or `false`.
+
+        Raises
+        ------
+        ExecuteTimeoutError
+            If the time to execute the query exceeds the configured timeout.
+        QueryError
+            If the API returns an error.
+        """
+        _args: list[_Arg] = []
+        _ctx = self._select("generated", _args)
+        return await _ctx.execute(bool)
 
     async def id(self) -> str:
         """A unique identifier for this PyprojectProject.
