@@ -7,9 +7,8 @@ type ModuleTypes {
         .withField("path", typeDef.withKind(TypeDefKind.STRING_KIND))
         .withFunction(
           function("check", typeDef.withOptional(true).withKind(TypeDefKind.VOID_KIND))
-            .withDescription("Run `deptry .` in this project and fail on any dependency issue.\n\nOnly this project's directory is loaded from the workspace.")
+            .withDescription("Run `deptry .` in this project and fail on any dependency issue.\n\nOnly the files this project owns are loaded: its directory less the\nprojects nested in it, such as generated Dagger code or test fixtures.")
             .withCheck
-            .withArg("ws", typeDef.withObject("Workspace"), description: "A Dagger workspace detected from the current working directory or\nconstructed from a Directory.")
             .withArg("version", typeDef.withKind(TypeDefKind.STRING_KIND), description: "deptry version to use (ignored when `ctr` is set).", defaultValue: ("\"0.25.1\"" :: Dagger.JSON!))
             .withArg("ctr", typeDef.withOptional(true).withObject("Container").withOptional(true), description: "Container with deptry installed. Defaults to the official ghcr.io/astral-sh/uv image with deptry installed as a uv tool. Overrides `version`.", defaultValue: ("null" :: Dagger.JSON!))
             .withArg("args", typeDef.withOptional(true).withListOf(typeDef.withKind(TypeDefKind.STRING_KIND)).withOptional(true), description: "Additional arguments to pass to deptry (added before the project root).", defaultValue: ("null" :: Dagger.JSON!))
@@ -25,14 +24,13 @@ type ModuleTypes {
             .withArg("path", typeDef.withKind(TypeDefKind.STRING_KIND))
         ),
       typeDef.withObject("Deptry", description: "Linter for Python dependency issues.\n\ndeptry checks a single Python project: it reads the declared dependencies\n(from a `pyproject.toml`) and scans that project's source for imports to\nfind unused, missing, misplaced or transitive dependencies. `projects`\ndiscovers every project in the source tree, and its `check` runs once per\nproject, so one Dagger check covers a monorepo.\n\nLearn more about deptry at <https://deptry.com>.")
-        .withField("project_paths", typeDef.withListOf(typeDef.withKind(TypeDefKind.STRING_KIND)))
         .withFunction(
           function("projects", typeDef.withObject("DeptryProjects"))
             .withDescription("Every Python project deptry checks in the source tree.")
         )
         .withConstructor(
           function("", typeDef.withObject("Deptry"))
-            .withDescription("Discover the projects: one per `pyproject.toml` that declares dependencies\n(see `_project_info`) and either has its own package source or declares a\n`[tool.deptry]` section. A project with no package of its own (e.g. a uv\nworkspace root that only aggregates members in subdirectories) is left\nout, so `deptry .` never spills over the rest of the monorepo, unless its\n`[tool.deptry]` section opts it in explicitly. Paths matching `exclude` are\nleft out too.\n\nThe workspace is walked on the host, and only the pyproject.toml files\nare loaded.")
+            .withDescription("Discover the projects: one per `pyproject.toml` the `pyproject` module\nfinds, other than Dagger-generated ones, that declares dependencies (see `_project_info`) and either has its\nown package source or declares a `[tool.deptry]` section. A project with\nno package of its own (e.g. a uv workspace root that only aggregates\nmembers in subdirectories) is left out, unless its `[tool.deptry]`\nsection opts it in explicitly. Paths matching `exclude` are left out too.\n\nThe workspace is walked on the host, and only the pyproject.toml files\nare loaded.")
             .withArg("ws", typeDef.withObject("Workspace"), description: "A Dagger workspace detected from the current working directory or\nconstructed from a Directory.")
             .withArg("exclude", typeDef.withOptional(true).withListOf(typeDef.withKind(TypeDefKind.STRING_KIND)).withOptional(true), description: "Glob patterns of project paths to leave out of projects, e.g. **/tests/_packages/**.", defaultValue: ("null" :: Dagger.JSON!))
         ),

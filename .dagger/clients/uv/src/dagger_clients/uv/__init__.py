@@ -41,8 +41,9 @@ _TARGET = _Target(name=NAME, ref=REF, pin=PIN)
 
 class Uv(_Type):
     """ Entrypoint for the `uv` module.  Hands out one `UvWorkspaceSource`
-    per uv workspace. Use `workspace` to grab a single workspace by path
-    or `workspaces` to get them all.  Learn more in the
+    per uv workspace, as the `pyproject` module discovers them. Use
+    `workspace` to grab a single workspace by path or `workspaces` to get
+    them all.  Learn more in the
     [docs](https://daggerverse.docs.typesafe.ai/uv/).  """
 
     async def id(self) -> str:
@@ -73,14 +74,6 @@ class Uv(_Type):
         _ctx = self._select("id", _args)
         return await _ctx.execute(str)
 
-    def source(self) -> Directory:
-        """Source tree: the Dagger workspace, less caches, virtualenvs and
-        gitignored files.
-        """
-        _args: list[_Arg] = []
-        _ctx = self._select("source", _args)
-        return Directory(_ctx)
-
     def workspace(self, path: str) -> "UvWorkspaceSource":
         """
         A single uv workspace at `path`, relative to the workspace root.
@@ -102,28 +95,6 @@ class Uv(_Type):
         ]
         _ctx = self._select("workspace", _args)
         return UvWorkspaceSource(_ctx)
-
-    async def workspace_paths(self) -> list[str]:
-        """Paths of the uv workspaces found in the source tree, relative to its
-        root.
-
-        Returns
-        -------
-        list[str]
-            The `String` scalar type represents textual data, represented as
-            UTF-8 character sequences. The String type is most often used by
-            GraphQL to represent free-form human-readable text.
-
-        Raises
-        ------
-        ExecuteTimeoutError
-            If the time to execute the query exceeds the configured timeout.
-        QueryError
-            If the API returns an error.
-        """
-        _args: list[_Arg] = []
-        _ctx = self._select("workspacePaths", _args)
-        return await _ctx.execute(list[str])
 
     def workspaces(self) -> "UvWorkspaces":
         """
@@ -1247,24 +1218,24 @@ class UvWorkspaceSource(_Type):
     (`"."` for a root workspace), relative to the Dagger workspace root.
     From those it derives everything it needs to `audit` the locked
     dependencies or `build` a minimal container for a package, so the
-    parent `Uv` stays a thin, container-free entrypoint.  The full
-    `source` (rather than just the sliced workspace directory) is carried
-    so builds can reach sibling path-dependencies that live *outside* the
-    workspace root (e.g. `../my-dep` in a nested workspace).  Named
-    `UvWorkspaceSource` (not `UvWorkspace`) to avoid colliding with the
-    top-level `Uv` constructor when composed in a parent module.  """
+    parent `Uv` stays a thin, container-free entrypoint.  `source` keeps
+    workspace-root-relative paths and holds the members plus their path
+    dependencies, wherever they live, so builds can reach a sibling like
+    `../my-dep` in a nested workspace. Projects nested in those trees that
+    nothing needs (e.g. test fixtures) are left out, so their edits don't
+    invalidate this workspace's builds.  Named `UvWorkspaceSource` (not
+    `UvWorkspace`) to avoid colliding with the top-level `Uv` constructor
+    when composed in a parent module.  """
 
-    def audit(self, ws: Workspace, *, uv_version: str | None = None, image: str | None = None,) -> Check:
+    def audit(self, *, uv_version: str | None = None, image: str | None = None,) -> Check:
         """
         Run `uv audit --frozen` on this workspace's locked dependencies.
 
         Audits straight from the committed uv.lock without re-resolving
         against
         package indexes (`--frozen`); vulnerability data comes from the public
-        OSV service, so no index credentials are required. Only the files uv
-        reads are loaded from the Dagger workspace: uv.lock, uv.toml and every
-        pyproject.toml, since a workspace's members must be present for uv to
-        load it.
+        OSV service, so no index credentials are required. Only `manifests` is
+        mounted, so a source edit leaves the audit cached.
 
         The image is resolved here: explicit `image` > `image_ref(uv_version)`
         >
@@ -1272,23 +1243,17 @@ class UvWorkspaceSource(_Type):
 
         Parameters
         ----------
-        ws:
-            A Dagger workspace detected from the current working directory or
-            constructed from a Directory.
         uv_version:
             uv version (image tag) to audit with. Defaults to the version
             detected from the workspace; ignored when `image` is set.
         image:
             Full uv image reference to audit with. Overrides `uv_version`.
         """
-        if not (isinstance(ws, Workspace)):
-            raise _type_error("UvWorkspaceSource.audit", "ws", ws, "Workspace")
         if not (uv_version is None or isinstance(uv_version, str)):
             raise _type_error("UvWorkspaceSource.audit", "uv_version", uv_version, "str | None")
         if not (image is None or isinstance(image, str)):
             raise _type_error("UvWorkspaceSource.audit", "image", image, "str | None")
         _args = [
-            _Arg("ws", ws),
             _Arg("uvVersion", uv_version, None),
             _Arg("image", image, None),
         ]
@@ -1520,6 +1485,14 @@ class UvWorkspaceSource(_Type):
         _ctx = self._select("install", _args)
         return Container(_ctx)
 
+    def manifests(self) -> Directory:
+        """Only what resolving the workspace reads: uv.lock, uv.toml and the
+        members' pyproject.toml files.
+        """
+        _args: list[_Arg] = []
+        _ctx = self._select("manifests", _args)
+        return Directory(_ctx)
+
     def package(self, path: str) -> UvPackageSource:
         """
         A single member package within this workspace.
@@ -1589,8 +1562,8 @@ class UvWorkspaceSource(_Type):
         return await _ctx.execute(str | None)
 
     def source(self) -> Directory:
-        """Source tree containing the workspace (and any sibling path-
-        dependencies).
+        """The workspace's members and their path dependencies, at workspace-
+        root-relative paths.
         """
         _args: list[_Arg] = []
         _ctx = self._select("source", _args)
@@ -1810,7 +1783,8 @@ def uv(ws: Workspace, *, exclude: list[str] | None = None, session: _Session | N
     """
     Entrypoint for the `uv` module.
 
-    Hands out one `UvWorkspaceSource` per uv workspace.
+    Hands out one `UvWorkspaceSource` per uv workspace, as the `pyproject`
+    module discovers them.
     Use `workspace` to grab a single workspace by path or `workspaces` to
     get them all.
 

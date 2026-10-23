@@ -42,7 +42,7 @@ type ModuleTypes {
         )
         .withFunction(
           function("deptry_discovers_projects", typeDef.withOptional(true).withKind(TypeDefKind.VOID_KIND))
-            .withDescription("`projects` finds one entry per pyproject.toml that declares dependencies.\n\nA tooling-only pyproject (no `[project].dependencies`) is left out.")
+            .withDescription("`projects` finds one entry per pyproject.toml that declares dependencies.\n\nA tooling-only pyproject (no `[project].dependencies`) and a\nDagger-generated one (`[tool.dagger] generated`) are left out.")
         )
         .withFunction(
           function("deptry_projects_exclude", typeDef.withOptional(true).withKind(TypeDefKind.VOID_KIND))
@@ -83,6 +83,10 @@ type ModuleTypes {
         .withFunction(
           function("pyproject_discovers_projects_and_workspaces", typeDef.withOptional(true).withKind(TypeDefKind.VOID_KIND))
             .withDescription("Every pyproject.toml is a project and every uv.lock a workspace, less `exclude`.")
+        )
+        .withFunction(
+          function("pyproject_project_files", typeDef.withOptional(true).withKind(TypeDefKind.VOID_KIND))
+            .withDescription("A project's files stop at the projects nested in it, needed or not.")
         )
         .withFunction(
           function("pyproject_project_source", typeDef.withOptional(true).withKind(TypeDefKind.VOID_KIND))

@@ -1,10 +1,11 @@
 version = 1
-revision = 3
+revision = 5
 requires-python = ">=3.13"
 
 [manifest]
 members = [
     "dagger-clients-core",
+    "dagger-clients-pyproject",
     "dagger-io",
     "deptry",
 ]
@@ -200,6 +201,21 @@ dependencies = [
 requires-dist = [{ name = "dagger-io", editable = "sdk" }]
 
 [[package]]
+name = "dagger-clients-pyproject"
+version = "0.0.0"
+source = { editable = "clients/pyproject" }
+dependencies = [
+    { name = "dagger-clients-core" },
+    { name = "dagger-io" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "dagger-clients-core", editable = "clients/core" },
+    { name = "dagger-io", editable = "sdk" },
+]
+
+[[package]]
 name = "dagger-io"
 version = "0.0.0"
 source = { editable = "sdk" }
@@ -247,6 +263,7 @@ version = "0.1.0"
 source = { editable = "." }
 dependencies = [
     { name = "dagger-clients-core" },
+    { name = "dagger-clients-pyproject" },
     { name = "dagger-io" },
 ]
 
@@ -263,6 +280,7 @@ docs = [
 [package.metadata]
 requires-dist = [
     { name = "dagger-clients-core", editable = "clients/core" },
+    { name = "dagger-clients-pyproject", editable = "clients/pyproject" },
     { name = "dagger-io", editable = "sdk" },
 ]
 

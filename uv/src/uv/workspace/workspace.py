@@ -7,7 +7,7 @@ from typing import Annotated
 import dagger
 from dagger import Doc, check, field, function, object_type
 from dagger.telemetry import get_tracer
-from dagger_clients.core import Container, Directory, File, ReturnType, Workspace, core
+from dagger_clients.core import Container, Directory, File, ReturnType, core
 
 from uv.args import (
     AllExtras,
@@ -48,9 +48,11 @@ class UvWorkspaceSource:
     locked dependencies or `build` a minimal container for a package, so
     the parent `Uv` stays a thin, container-free entrypoint.
 
-    The full `source` (rather than just the sliced workspace directory) is
-    carried so builds can reach sibling path-dependencies that live *outside*
-    the workspace root (e.g. `../my-dep` in a nested workspace).
+    `source` keeps workspace-root-relative paths and holds the members plus
+    their path dependencies, wherever they live, so builds can reach a
+    sibling like `../my-dep` in a nested workspace. Projects nested in those
+    trees that nothing needs (e.g. test fixtures) are left out, so their edits
+    don't invalidate this workspace's builds.
 
     Named `UvWorkspaceSource` (not `UvWorkspace`) to avoid colliding with
     the top-level `Uv` constructor when composed in a parent module.
@@ -58,7 +60,12 @@ class UvWorkspaceSource:
 
     source: Annotated[
         Directory,
-        Doc("Source tree containing the workspace (and any sibling path-dependencies)."),
+        Doc("The workspace's members and their path dependencies, at workspace-root-relative paths."),
+    ] = field()
+
+    manifests: Annotated[
+        Directory,
+        Doc("Only what resolving the workspace reads: uv.lock, uv.toml and the members' pyproject.toml files."),
     ] = field()
 
     path: Annotated[
@@ -203,7 +210,6 @@ class UvWorkspaceSource:
     @function
     async def audit(
         self,
-        ws: Workspace,
         uv_version: Annotated[
             str | None,
             Doc(
@@ -220,10 +226,8 @@ class UvWorkspaceSource:
 
         Audits straight from the committed uv.lock without re-resolving against
         package indexes (`--frozen`); vulnerability data comes from the public
-        OSV service, so no index credentials are required. Only the files uv
-        reads are loaded from the Dagger workspace: uv.lock, uv.toml and every
-        pyproject.toml, since a workspace's members must be present for uv to
-        load it.
+        OSV service, so no index credentials are required. Only `manifests` is
+        mounted, so a source edit leaves the audit cached.
 
         The image is resolved here: explicit `image` > `image_ref(uv_version)` >
         the version detected from the workspace.
@@ -236,15 +240,8 @@ class UvWorkspaceSource:
             # the bare astral image ships uv at /uv (not on PATH); prepending /
             # makes a plain `uv` work for both it and images with uv on PATH.
             .with_env_variable("PATH", "/:${PATH}", expand=True)
-            .with_directory(
-                "/work",
-                ws.directory(
-                    "/" + posixpath.normpath(self.path),
-                    include=["uv.lock", "uv.toml", "**/pyproject.toml"],
-                    gitignore=True,
-                ),
-            )
-            .with_workdir("/work")
+            .with_directory("/work", self.manifests)
+            .with_workdir(posixpath.join("/work", self.path))
         )
         try:
             await ctr.with_exec(["uv", "audit", "--frozen"]).sync()

@@ -168,6 +168,8 @@ class Manifest:
     name: str | None
     dependencies: frozenset[str]
     """Normalized names of every declared dependency (see `declared_dependencies`)."""
+    generated: bool
+    """Whether Dagger generated this project (`[tool.dagger] generated`)."""
     sources: Mapping[str, Source]
     """`[tool.uv.sources]`, keyed by normalized package name."""
     members: tuple[str, ...] | None
@@ -195,6 +197,7 @@ class Manifest:
             path=path,
             name=data.get("project", {}).get("name"),
             dependencies=declared_dependencies(data),
+            generated="generated" in data.get("tool", {}).get("dagger", {}),
             sources=sources,
             members=None if workspace is None else tuple(workspace.get("members", [])),
             member_exclude=() if workspace is None else tuple(workspace.get("exclude", [])),
@@ -205,6 +208,7 @@ class Manifest:
 class Project:
     path: str
     name: str | None
+    generated: bool
     workspace: str | None
     nested: tuple[str, ...]
     local_dependencies: tuple[str, ...]
@@ -339,6 +343,7 @@ class Discovery:
         return Project(
             path=path,
             name=self.manifest(path).name,
+            generated=self.manifest(path).generated,
             workspace=self.workspace_of(path),
             nested=tuple(topmost(p for p in self.project_paths if p != path and under(p, path))),
             local_dependencies=tuple(d for d in closure if d in self._texts),

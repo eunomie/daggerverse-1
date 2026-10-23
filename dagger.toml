@@ -30,6 +30,7 @@ module = "python-sdk"
 
 [sdks.python.scopes.deptry]
 is-module = true
+clients = ["./pyproject"]
 
 [sdks.python.scopes.github]
 is-module = true
@@ -42,6 +43,7 @@ is-module = true
 
 [sdks.python.scopes.uv]
 is-module = true
+clients = ["./pyproject"]
 
 [sdks.python.scopes.zizmor]
 is-module = true

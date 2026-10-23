@@ -1,10 +1,9 @@
 """Pure helpers for the uv module (no Dagger runtime required)."""
 
-import posixpath
 import re
 import tomllib
 from collections import OrderedDict, deque
-from pathlib import Path, PurePosixPath
+from pathlib import Path
 
 from packaging.specifiers import SpecifierSet
 from packaging.version import Version
@@ -50,21 +49,6 @@ def debian_image_ref(version: str) -> str:
     recent versions).
     """
     return f"{_DEFAULT_IMAGE}:{version}-debian"
-
-
-def root_relative(cwd: str, path: str) -> str:
-    """A workspace-root-relative path for `path`, which is relative to the workspace `cwd`.
-
-    `Workspace.find_roots` answers relative to the cwd (`.` for the cwd itself,
-    `../x` for a sibling); collection keys are relative to the workspace root so
-    they don't depend on where `dagger` runs.
-    """
-    return posixpath.normpath(posixpath.join(cwd.lstrip("/"), path))
-
-
-def is_excluded(path: str, patterns: list[str]) -> bool:
-    workspace = PurePosixPath(path)
-    return any(workspace.full_match(pattern) for pattern in patterns)
 
 
 def is_exact_version(value: str) -> bool:

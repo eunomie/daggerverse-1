@@ -115,14 +115,14 @@ type ModuleTypes {
             .withDescription("The package indices configured in this member's `pyproject.toml`.\n\nReads `[[tool.uv.index]]` from the member's own `pyproject.toml`.\nWhen `include_from_workspace` is set, also reads workspace-level\nindices and merges them (package-level entries win on name collision).")
             .withArg("include_from_workspace", typeDef.withKind(TypeDefKind.BOOLEAN_KIND), description: "Merge indices from the workspace root's configuration. When True, workspace-level indices are included alongside the package's own indices (deduplicated by name, package wins).", defaultValue: ("false" :: Dagger.JSON!))
         ),
-      typeDef.withObject("UvWorkspaceSource", description: "A self-contained uv workspace: the source files rooted at a `uv.lock`.\n\nCarries the source tree and the workspace's path within it (`\".\"` for a\nroot workspace), relative to the Dagger workspace root. From those it derives everything it needs to `audit` the\nlocked dependencies or `build` a minimal container for a package, so\nthe parent `Uv` stays a thin, container-free entrypoint.\n\nThe full `source` (rather than just the sliced workspace directory) is\ncarried so builds can reach sibling path-dependencies that live *outside*\nthe workspace root (e.g. `../my-dep` in a nested workspace).\n\nNamed `UvWorkspaceSource` (not `UvWorkspace`) to avoid colliding with\nthe top-level `Uv` constructor when composed in a parent module.")
-        .withField("source", typeDef.withObject("Directory"), description: "Source tree containing the workspace (and any sibling path-dependencies).")
+      typeDef.withObject("UvWorkspaceSource", description: "A self-contained uv workspace: the source files rooted at a `uv.lock`.\n\nCarries the source tree and the workspace's path within it (`\".\"` for a\nroot workspace), relative to the Dagger workspace root. From those it derives everything it needs to `audit` the\nlocked dependencies or `build` a minimal container for a package, so\nthe parent `Uv` stays a thin, container-free entrypoint.\n\n`source` keeps workspace-root-relative paths and holds the members plus\ntheir path dependencies, wherever they live, so builds can reach a\nsibling like `../my-dep` in a nested workspace. Projects nested in those\ntrees that nothing needs (e.g. test fixtures) are left out, so their edits\ndon't invalidate this workspace's builds.\n\nNamed `UvWorkspaceSource` (not `UvWorkspace`) to avoid colliding with\nthe top-level `Uv` constructor when composed in a parent module.")
+        .withField("source", typeDef.withObject("Directory"), description: "The workspace's members and their path dependencies, at workspace-root-relative paths.")
+        .withField("manifests", typeDef.withObject("Directory"), description: "Only what resolving the workspace reads: uv.lock, uv.toml and the members' pyproject.toml files.")
         .withField("path", typeDef.withKind(TypeDefKind.STRING_KIND), description: "Workspace root path (holding uv.lock/pyproject.toml) within `source`. `.` for a root workspace.")
         .withFunction(
           function("audit", typeDef.withOptional(true).withKind(TypeDefKind.VOID_KIND))
-            .withDescription("Run `uv audit --frozen` on this workspace's locked dependencies.\n\nAudits straight from the committed uv.lock without re-resolving against\npackage indexes (`--frozen`); vulnerability data comes from the public\nOSV service, so no index credentials are required. Only the files uv\nreads are loaded from the Dagger workspace: uv.lock, uv.toml and every\npyproject.toml, since a workspace's members must be present for uv to\nload it.\n\nThe image is resolved here: explicit `image` > `image_ref(uv_version)` >\nthe version detected from the workspace.")
+            .withDescription("Run `uv audit --frozen` on this workspace's locked dependencies.\n\nAudits straight from the committed uv.lock without re-resolving against\npackage indexes (`--frozen`); vulnerability data comes from the public\nOSV service, so no index credentials are required. Only `manifests` is\nmounted, so a source edit leaves the audit cached.\n\nThe image is resolved here: explicit `image` > `image_ref(uv_version)` >\nthe version detected from the workspace.")
             .withCheck
-            .withArg("ws", typeDef.withObject("Workspace"), description: "A Dagger workspace detected from the current working directory or\nconstructed from a Directory.")
             .withArg("uv_version", typeDef.withOptional(true).withKind(TypeDefKind.STRING_KIND).withOptional(true), description: "uv version (image tag) to audit with. Defaults to the version detected from the workspace; ignored when `image` is set.", defaultValue: ("null" :: Dagger.JSON!))
             .withArg("image", typeDef.withOptional(true).withKind(TypeDefKind.STRING_KIND).withOptional(true), description: "Full uv image reference to audit with. Overrides `uv_version`.", defaultValue: ("null" :: Dagger.JSON!))
         )
@@ -194,7 +194,6 @@ type ModuleTypes {
       typeDef.withObject("UvWorkspaces", description: "Every uv workspace in the source tree (one per uv.lock), keyed by its path.\n\n`audit` runs once per selected workspace, so each workspace is its own check\nthat can be selected or skipped on its own.")
         .withCollection
         .withField("paths", typeDef.withListOf(typeDef.withKind(TypeDefKind.STRING_KIND)), description: "uv workspace root paths (holding uv.lock), relative to the workspace root. `.` for the root.")
-        .withField("source", typeDef.withObject("Directory"), description: "Source tree containing the workspaces.")
         .withCollectionKeys("paths")
         .withCollectionGet("workspace")
         .withFunction(
@@ -202,9 +201,7 @@ type ModuleTypes {
             .withDescription("The uv workspace rooted at `path`.")
             .withArg("path", typeDef.withKind(TypeDefKind.STRING_KIND), description: "Path to the uv workspace root (holding uv.lock and pyproject.toml), relative to the workspace root.")
         ),
-      typeDef.withObject("Uv", description: "Entrypoint for the `uv` module.\n\nHands out one `UvWorkspaceSource` per uv workspace.\nUse `workspace` to grab a single workspace by path or `workspaces` to get them all.\n\nLearn more in the [docs](https://daggerverse.docs.typesafe.ai/uv/).")
-        .withField("source", typeDef.withObject("Directory"), description: "Source tree: the Dagger workspace, less caches, virtualenvs and gitignored files.")
-        .withField("workspace_paths", typeDef.withListOf(typeDef.withKind(TypeDefKind.STRING_KIND)), description: "Paths of the uv workspaces found in the source tree, relative to its root.")
+      typeDef.withObject("Uv", description: "Entrypoint for the `uv` module.\n\nHands out one `UvWorkspaceSource` per uv workspace, as the `pyproject`\nmodule discovers them.\nUse `workspace` to grab a single workspace by path or `workspaces` to get them all.\n\nLearn more in the [docs](https://daggerverse.docs.typesafe.ai/uv/).")
         .withFunction(
           function("workspace", typeDef.withObject("UvWorkspaceSource"))
             .withDescription("A single uv workspace at `path`, relative to the workspace root.\n\nThe returned `UvWorkspaceSource` can `audit` its locked dependencies or\n`build` a minimal container for a package.")

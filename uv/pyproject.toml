@@ -2,7 +2,7 @@
 name = "uv"
 version = "0.1.0"
 requires-python = ">=3.13"
-dependencies = ["dagger-io", "packaging", "dagger-clients-core"]
+dependencies = ["dagger-io", "packaging", "dagger-clients-core", "dagger-clients-pyproject"]
 
 [build-system]
 requires = ["uv_build>=0.8.4,<0.9.0"]
@@ -11,6 +11,7 @@ build-backend = "uv_build"
 [tool.uv.sources]
 dagger-io = { workspace = true }
 dagger-clients-core = { workspace = true }
+dagger-clients-pyproject = { workspace = true }
 
 # Map distributions to the import packages they ship, so deptry doesn't flag
 # those imports as missing/unused: `dagger-io` ships `dagger`, and the
@@ -18,6 +19,7 @@ dagger-clients-core = { workspace = true }
 [tool.deptry.package_module_name_map]
 dagger-io = "dagger"
 dagger-clients-core = "dagger_clients"
+dagger-clients-pyproject = "dagger_clients"
 
 [dependency-groups]
 dev = [
@@ -32,4 +34,4 @@ docs = [
 testpaths = ["tests"]
 
 [tool.uv.workspace]
-members = ["sdk", "clients/core"]
+members = ["sdk", "clients/core", "clients/pyproject"]
