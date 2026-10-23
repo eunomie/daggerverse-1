@@ -87,6 +87,32 @@ def matches(path: str, patterns: Iterable[str]) -> bool:
     return False
 
 
+_REQUIREMENT_NAME = re.compile(r"\s*([A-Za-z0-9](?:[A-Za-z0-9._-]*[A-Za-z0-9])?)")
+
+
+def requirement_name(requirement: str) -> str | None:
+    """The normalized project name a PEP 508 requirement string starts with."""
+    found = _REQUIREMENT_NAME.match(requirement)
+    return normalize_name(found[1]) if found else None
+
+
+def declared_dependencies(data: Mapping) -> frozenset[str]:
+    """Normalized names of every dependency a `pyproject.toml` declares.
+
+    `[project].dependencies`, every `[project.optional-dependencies]` extra,
+    every `[dependency-groups]` group (whose `{ include-group = ... }` entries
+    name groups, not packages) and the legacy `[tool.uv] dev-dependencies`.
+    """
+    project = data.get("project", {})
+    requirements = [
+        *project.get("dependencies", []),
+        *(r for extra in project.get("optional-dependencies", {}).values() for r in extra),
+        *(r for group in data.get("dependency-groups", {}).values() for r in group if isinstance(r, str)),
+        *data.get("tool", {}).get("uv", {}).get("dev-dependencies", []),
+    ]
+    return frozenset(name for r in requirements if (name := requirement_name(r)) is not None)
+
+
 def tree(path: str) -> list[str]:
     """Include patterns covering `path` and everything below it."""
     return ["**"] if path == "." else [path, f"{path}/**"]
@@ -140,6 +166,8 @@ class Manifest:
 
     path: str
     name: str | None
+    dependencies: frozenset[str]
+    """Normalized names of every declared dependency (see `declared_dependencies`)."""
     sources: Mapping[str, Source]
     """`[tool.uv.sources]`, keyed by normalized package name."""
     members: tuple[str, ...] | None
@@ -166,6 +194,7 @@ class Manifest:
         return cls(
             path=path,
             name=data.get("project", {}).get("name"),
+            dependencies=declared_dependencies(data),
             sources=sources,
             members=None if workspace is None else tuple(workspace.get("members", [])),
             member_exclude=() if workspace is None else tuple(workspace.get("exclude", [])),
@@ -244,8 +273,9 @@ class Discovery:
     def _direct_dependencies(self, path: str) -> set[str]:
         """Root-relative paths the project at `path` depends on through `[tool.uv.sources]`.
 
-        A uv workspace member inherits the root's sources, overridden per
-        package by its own. `{ workspace = true }` names a member of the same
+        As in uv, a source only applies to a package the project declares as a
+        dependency; an entry for anything else is ignored. A uv workspace member
+        inherits the root's sources, overridden per package by its own. `{ workspace = true }` names a member of the same
         workspace. Paths above the workspace root can't be loaded and are left
         out; paths that don't exist stay in, and simply load nothing.
         """
@@ -263,6 +293,8 @@ class Discovery:
                     members[normalize_name(name)] = member
         dependencies: set[str] = set()
         for name, source in sources.items():
+            if name not in manifest.dependencies:
+                continue
             dependencies.update(source.paths)
             if source.workspace and name in members:
                 dependencies.add(members[name])

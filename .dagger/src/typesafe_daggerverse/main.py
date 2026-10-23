@@ -958,7 +958,10 @@ print("LAYER_CACHE_OK")
                 ),
             )
             .with_new_file("uv.lock", "")
-            .with_new_file("packages/a/pyproject.toml", manifest("a", "[tool.uv.sources]\nb = { workspace = true }\n"))
+            .with_new_file(
+                "packages/a/pyproject.toml",
+                manifest("a", 'dependencies = ["b", "shared"]\n[tool.uv.sources]\nb = { workspace = true }\n'),
+            )
             .with_new_file("packages/a/src/a/__init__.py", "")
             .with_new_file("packages/b/pyproject.toml", manifest("b"))
             .with_new_file("packages/b/src/b/__init__.py", "")

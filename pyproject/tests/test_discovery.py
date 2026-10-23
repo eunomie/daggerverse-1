@@ -1,11 +1,11 @@
 import pytest
 from pyproject.discovery import SOURCE_EXCLUDE, Discovery, Gitignore, Manifest, matches, root_relative, topmost
 
-PROJECT = '[project]\nname = "{name}"\nversion = "0"\n'
+PROJECT = '[project]\nname = "{name}"\nversion = "0"\ndependencies = {deps!r}\n'
 
 
-def project(name: str, extra: str = "") -> str:
-    return PROJECT.format(name=name) + extra
+def project(name: str, extra: str = "", deps: list[str] | None = None) -> str:
+    return PROJECT.format(name=name, deps=deps or []).replace("'", '"') + extra
 
 
 def uv_workspace(name: str, members: list[str], exclude: list[str] | None = None, extra: str = "") -> str:
@@ -86,6 +86,19 @@ class TestManifest:
         manifest = Manifest.parse(".", project("x", '\n[tool.uv]\nsources.lib = { path = "lib" }\n'))
         assert manifest.sources["lib"].paths == ("lib",)
 
+    def test_declared_dependencies(self):
+        manifest = Manifest.parse(
+            ".",
+            project(
+                "x",
+                "\n[project.optional-dependencies]\nviz = [\"Tabulate>=0.9; python_version>'3'\"]\n"
+                '\n[dependency-groups]\ndev = ["pytest", { include-group = "lint" }]\nlint = ["ruff[all]"]\n'
+                '\n[tool.uv]\ndev-dependencies = ["mypy==1.0"]\n',
+                deps=["My_Lib @ file:///x"],
+            ),
+        )
+        assert manifest.dependencies == {"my-lib", "tabulate", "pytest", "ruff", "mypy"}
+
     def test_invalid_toml_names_the_file(self):
         with pytest.raises(ValueError, match=r"^a/pyproject.toml: "):
             Manifest.parse("a", "[project\n")
@@ -151,7 +164,9 @@ class TestDiscovery:
     def test_path_dependency_outside_the_workspace_root(self):
         found = Discovery(
             {
-                "nested/app": project("app", '\n[tool.uv.sources]\nlib = { path = "../my-lib", editable = true }\n'),
+                "nested/app": project(
+                    "app", '\n[tool.uv.sources]\nlib = { path = "../my-lib", editable = true }\n', deps=["lib"]
+                ),
                 "nested/my-lib": project("lib"),
             },
             {"nested/app": ["uv.lock"]},
@@ -164,11 +179,31 @@ class TestDiscovery:
         assert "nested/my-lib/pyproject.toml" in workspace.manifest_include
         assert found.project("nested/my-lib").workspace is None
 
+    def test_sources_for_undeclared_packages_are_ignored(self):
+        # As in uv: a workspace root's sources name every member, but a member
+        # only pulls in the ones it depends on.
+        found = Discovery(
+            {
+                ".": uv_workspace(
+                    "root",
+                    ["libs/*"],
+                    extra="\n[tool.uv.sources]\na = { workspace = true }\nb = { workspace = true }\n",
+                ),
+                "libs/a": project("a", deps=["b"]),
+                "libs/b": project("b"),
+                "tool": project("tool", '\n[tool.uv.sources]\na = { path = "../libs/a" }\n', deps=["a"]),
+            },
+            {".": ["uv.lock"], "tool": ["uv.lock"]},
+        )
+        assert found.project("libs/a").local_dependencies == ("libs/b",)
+        assert found.project("libs/b").local_dependencies == ()
+        assert found.project("tool").local_dependencies == ("libs/a", "libs/b")
+
     def test_transitive_path_dependencies(self):
         found = Discovery(
             {
-                "app": project("app", '\n[tool.uv.sources]\nb = { path = "../b" }\n'),
-                "b": project("b", '\n[tool.uv.sources]\nc = { path = "../c" }\n'),
+                "app": project("app", '\n[tool.uv.sources]\nb = { path = "../b" }\n', deps=["b"]),
+                "b": project("b", '\n[tool.uv.sources]\nc = { path = "../c" }\n', deps=["c"]),
                 "c": project("c"),
             },
             {"app": ["uv.lock"]},
@@ -178,8 +213,8 @@ class TestDiscovery:
     def test_dependency_cycle_terminates(self):
         found = Discovery(
             {
-                "a": project("a", '\n[tool.uv.sources]\nb = { path = "../b" }\n'),
-                "b": project("b", '\n[tool.uv.sources]\na = { path = "../a" }\n'),
+                "a": project("a", '\n[tool.uv.sources]\nb = { path = "../b" }\n', deps=["b"]),
+                "b": project("b", '\n[tool.uv.sources]\na = { path = "../a" }\n', deps=["a"]),
             },
             {},
         )
@@ -194,6 +229,7 @@ class TestDiscovery:
                     'gone = { path = "../gone/pkg" }\n'
                     'outside = { path = "../../../outside" }\n'
                     'wheel = { path = "../wheels/w.whl" }\n',
+                    deps=["gone", "outside", "wheel"],
                 ),
             },
             {"ws/sub": ["uv.lock"]},
@@ -215,7 +251,7 @@ class TestDiscovery:
         found = Discovery(
             {
                 ".": uv_workspace("root", ["libs/*", "apps/*"]),
-                "apps/web": project("web", "\n[tool.uv.sources]\nmy-lib = { workspace = true }\n"),
+                "apps/web": project("web", "\n[tool.uv.sources]\nmy-lib = { workspace = true }\n", deps=["my-lib"]),
                 "libs/my_lib": project("My.Lib"),
                 "libs/unused": project("unused"),
             },
@@ -232,7 +268,7 @@ class TestDiscovery:
                 ".": uv_workspace(
                     "root", ["apps/*"], extra='\n[tool.uv.sources]\nshared = { path = "vendor/shared" }\n'
                 ),
-                "apps/web": project("web"),
+                "apps/web": project("web", deps=["shared"]),
                 "vendor/shared": project("shared"),
             },
             {".": ["uv.lock"]},
@@ -243,7 +279,9 @@ class TestDiscovery:
         found = Discovery(
             {
                 ".": uv_workspace("root", ["apps/*"], extra='\n[tool.uv.sources]\nshared = { path = "vendor/a" }\n'),
-                "apps/web": project("web", '\n[tool.uv.sources]\nshared = { path = "../../vendor/b" }\n'),
+                "apps/web": project(
+                    "web", '\n[tool.uv.sources]\nshared = { path = "../../vendor/b" }\n', deps=["shared"]
+                ),
                 "vendor/a": project("a"),
                 "vendor/b": project("b"),
             },
@@ -254,7 +292,7 @@ class TestDiscovery:
     def test_root_project_leaves_out_unrelated_nested_projects(self):
         found = Discovery(
             {
-                ".": project("root", '\n[tool.uv.sources]\nlib = { path = "lib" }\n'),
+                ".": project("root", '\n[tool.uv.sources]\nlib = { path = "lib" }\n', deps=["lib"]),
                 "lib": project("lib"),
                 "lib/tests/fixture": project("fixture"),
                 "tools/a": project("a"),
