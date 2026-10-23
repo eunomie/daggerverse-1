@@ -5,6 +5,7 @@
 ["","git-latest",["github.com/dagger/python-sdk",["tagPrefix","runtime"],["version","v1.2.0"]],"refs/tags/v1.2.0"]
 ["","git-latest",["github.com/dagger/python-sdk"],"refs/tags/v1.2.0"]
 ["","git-latest",["github.com/dagger/sdk-helpers",["version","v1.0.6"]],"refs/tags/v1.0.6"]
+["","git-sha",["github.com/dagger/python-sdk","fix-workspace-ref-beta20"],"f894d72b0327e91ca00023a2954f66a4af3e5fe1"]
 ["","git-sha",["github.com/dagger/python-sdk","main"],"58e0a72f73af5c5f8611aa6e63880ebde0f31654"]
 ["","git-sha",["github.com/dagger/python-sdk","refs/tags/v1.2.0"],"eb9c4aa175054d8d27109afec8ab4cc9818cf2e5"]
 ["","git-sha",["github.com/dagger/sdk-helpers","refs/tags/v1.0.6"],"16e5bf2837eb1dc840a1c9ad7d6dba385f0038d3"]
