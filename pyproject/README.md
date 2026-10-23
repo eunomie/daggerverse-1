@@ -1,6 +1,6 @@
 # pyproject
 
-Dagger module that discovers the Python projects (`pyproject.toml`) and workspaces (`uv.lock`, `pylock.toml`, or any marker you configure) in a Dagger workspace, and loads exactly the source each one needs.
+Dagger module that discovers the Python projects (`pyproject.toml`) and workspaces (`uv.lock`, `pylock.toml`, or any marker you configure) in a Dagger workspace, and loads only the files each one needs.
 
 ## Installation
 

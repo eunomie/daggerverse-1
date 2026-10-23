@@ -7,7 +7,7 @@ description: A Dagger module that discovers Python projects and workspaces and l
 # pyproject
 
 A [Dagger](https://dagger.io) module that discovers the Python projects and
-workspaces in a Dagger workspace, and loads exactly the source each one needs.
+workspaces in a Dagger workspace, and loads only the files each one needs.
 It runs no tools itself: it is the discovery layer for modules that do.
 
 It exposes two [collections](https://docs.dagger.io/reference/sdks/python/#collections),
@@ -83,14 +83,14 @@ lockfile.
 ## How sources are scoped
 
 Every file belongs to the deepest project containing it. A `source` load
-includes the trees it needs and excludes every project nested in them that none
-of them needs. A monorepo root's source carries only the root's own files, and
+includes the project trees it needs and leaves out any other project nested
+inside them. A monorepo root's source carries only the root's own files, and
 a workspace's source leaves out test fixtures nested in a member. Caches,
 virtualenvs, build output, VCS metadata and gitignored files are always left out.
 
-Path sources that point at missing directories are kept and load nothing, so a
-partial checkout still discovers. Path sources above the workspace root can't
-be loaded and are skipped.
+Path sources that point at missing directories are kept and load nothing, so
+discovery still works on a partial checkout. Path sources above the workspace
+root can't be loaded and are skipped.
 
 ## Settings
 
@@ -102,8 +102,9 @@ exclude = ["**/tests/_packages/**"]
 workspaceMarkers = ["uv.lock", "pylock.toml", "pylock.prod.toml"]
 ```
 
-An excluded project is left out of the collections only: it still bounds the
-projects around it and still counts as a dependency. `**` crosses directories,
+An excluded project is left out of the collections only. Its files still
+belong to it rather than to the project around it, and it still counts as a
+dependency. `**` crosses directories,
 `*` doesn't, and a trailing `/**` also matches the directory itself.
 
 Markers are exact file names. List each named PEP 751 lock, such as
