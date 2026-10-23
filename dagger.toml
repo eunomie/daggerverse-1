@@ -47,5 +47,12 @@ is-module = true
 is-module = true
 
 [sdks.python.scopes.".dagger"]
-clients = ["./github", "./deptry", "github.com/dagger/pytest@dd183e94449051abdc3c7d745dd148fdc08396d4", "./twingate", "./ruff", "./uv", "./zizmor"]
+clients = ["./github", "./deptry", "github.com/dagger/pytest@dd183e94449051abdc3c7d745dd148fdc08396d4", "./twingate", "./ruff", "./uv", "./zizmor", "./pyproject"]
 is-module = true
+
+[modules.pyproject]
+source = "pyproject"
+
+[sdks.python.scopes.pyproject]
+is-module = true
+name = "pyproject"

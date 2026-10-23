@@ -10,6 +10,11 @@ type ModuleTypes {
             .withCheck
         )
         .withFunction(
+          function("all_pyproject", typeDef.withOptional(true).withKind(TypeDefKind.VOID_KIND))
+            .withDescription("Run all checks for the `pyproject` module in parallel.")
+            .withCheck
+        )
+        .withFunction(
           function("all_ruff", typeDef.withOptional(true).withKind(TypeDefKind.VOID_KIND))
             .withDescription("Run all checks for the `ruff` module in parallel.")
             .withCheck
@@ -74,6 +79,26 @@ type ModuleTypes {
           function("github_pytest", typeDef.withOptional(true).withKind(TypeDefKind.VOID_KIND))
             .withDescription("Run the github module's unit-test suite inside a freshly built container.")
             .withCheck
+        )
+        .withFunction(
+          function("pyproject_discovers_projects_and_workspaces", typeDef.withOptional(true).withKind(TypeDefKind.VOID_KIND))
+            .withDescription("Every pyproject.toml is a project and every uv.lock a workspace, less `exclude`.")
+        )
+        .withFunction(
+          function("pyproject_project_source", typeDef.withOptional(true).withKind(TypeDefKind.VOID_KIND))
+            .withDescription("A project's source holds its own files and its local dependencies', and nothing else.")
+        )
+        .withFunction(
+          function("pyproject_pytest_self", typeDef.withOptional(true).withKind(TypeDefKind.VOID_KIND))
+            .withDescription("Run the pyproject module's own pytest suite (the discovery logic, engine-free).")
+        )
+        .withFunction(
+          function("pyproject_workspace_markers", typeDef.withOptional(true).withKind(TypeDefKind.VOID_KIND))
+            .withDescription("`workspace_markers` decides which files make a directory a workspace.")
+        )
+        .withFunction(
+          function("pyproject_workspace_source_and_manifests", typeDef.withOptional(true).withKind(TypeDefKind.VOID_KIND))
+            .withDescription("A workspace's source leaves out unrelated nested projects; its manifests hold only resolver inputs.")
         )
         .withFunction(
           function("ruff_check_fix", typeDef.withKind(TypeDefKind.STRING_KIND))
