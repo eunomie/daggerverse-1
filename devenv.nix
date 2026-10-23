@@ -6,7 +6,7 @@
   pkgs-unstable = import inputs.nixpkgs-unstable {inherit (pkgs) system;};
   # dagger/nix only packages stable releases; track the 1.0 betas until 1.0.0 lands there.
   dagger = inputs.dagger.packages.${pkgs.system}.dagger.overrideAttrs (_: let
-    version = "1.0.0-beta.20";
+    version = "1.0.0-beta.21";
     platform =
       {
         x86_64-linux = "linux_amd64";
@@ -22,10 +22,10 @@
       url = "https://dl.dagger.io/dagger/releases/${version}/dagger_v${version}_${platform}.tar.gz";
       sha256 =
         {
-          linux_amd64 = "5982b67992b55cc1cc8636509a0f672a401368a16b865bbe1d257195e7b516ae";
-          linux_arm64 = "7b9a9989092832006f6188d92b60f92375a784bf2c92217b083999be6c6e2874";
-          darwin_amd64 = "4707d7573a95d2db314b19abe8dc28620b30eadd7a369b57a14312942690071d";
-          darwin_arm64 = "19e623d264b217570c0f8b84d85c8321c2e63f164fcdd4426f3e49245ec642cf";
+          linux_amd64 = "c5ac777a5c99089869660943381136e22177b59a46412e310c2fef594760a041";
+          linux_arm64 = "ba9d55638636918a3404313511bceba5cc0af22f487c1c1b6a5ba60ce70a61bb";
+          darwin_amd64 = "fdbe191c965d240ee9cc90719fa9dca1586805cbb89b0a0087314a84a0937354";
+          darwin_arm64 = "781f4862c022a19b9a4c498b59e1d9cfda1ee3cdc8ce210e4545bd8842a7416d";
         }.${
           platform
         };
